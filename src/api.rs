@@ -13,13 +13,9 @@ use log::{warn, info, error};
 use std::sync::Arc;
 
 use crate::clob_sdk;
-use crate::rate_limit::RateLimiter;
-use crate::metrics::MetricsCollector;
-use crate::circuit_breaker::CircuitBreaker;
 use alloy::signers::local::LocalSigner;
 use alloy::signers::Signer as _;
 use alloy::primitives::Address as AlloyAddress;
-use std::time::Instant;
 
 // CTF (Conditional Token Framework) imports for redemption
 // Based on docs: https://docs.polymarket.com/developers/builders/relayer-client#redeem-positions
@@ -82,12 +78,6 @@ pub struct PolymarketApi {
     authenticated: Arc<tokio::sync::Mutex<bool>>,
     clob_client_state: Arc<tokio::sync::Mutex<ClobClientState>>,
     clob_client_notify: Arc<tokio::sync::Notify>,
-    // Rate limiting for API calls
-    rate_limiter: RateLimiter,
-    // Circuit breaker for resilience
-    circuit_breaker: CircuitBreaker,
-    // Metrics collector (optional, can be None)
-    metrics: Option<Arc<MetricsCollector>>,
 }
 
 #[derive(Clone)]
@@ -126,16 +116,7 @@ impl PolymarketApi {
             authenticated: Arc::new(tokio::sync::Mutex::new(false)),
             clob_client_state: Arc::new(tokio::sync::Mutex::new(ClobClientState::Empty)),
             clob_client_notify: Arc::new(tokio::sync::Notify::new()),
-            rate_limiter: RateLimiter::for_clob_api(),
-            circuit_breaker: CircuitBreaker::for_clob_api(),
-            metrics: None,
         }
-    }
-
-    /// Set metrics collector for tracking API performance
-    pub fn with_metrics(mut self, metrics: Arc<MetricsCollector>) -> Self {
-        self.metrics = Some(metrics);
-        self
     }
 
     async fn ensure_clob_client(&self) -> Result<u64> {
@@ -1435,46 +1416,6 @@ impl PolymarketApi {
         side: &str,
         order_type: Option<&str>, // "FOK" or "FAK", defaults to FOK
     ) -> Result<OrderResponse> {
-        // Check circuit breaker
-        if self.circuit_breaker.is_open().await {
-            anyhow::bail!("Circuit breaker is open - API calls temporarily disabled due to high failure rate");
-        }
-        
-        // Rate limit API calls
-        self.rate_limiter.acquire().await;
-        
-        let start = Instant::now();
-        let result = self._place_market_order_internal(token_id, amount, side, order_type).await;
-        let latency = start.elapsed();
-        
-        // Update circuit breaker based on result
-        match &result {
-            Ok(_) => {
-                self.circuit_breaker.record_success().await;
-            }
-            Err(e) => {
-                // Only record failure if it's a retryable error
-                if crate::retry::is_retryable_error(&e.to_string()) {
-                    self.circuit_breaker.record_failure().await;
-                }
-            }
-        }
-        
-        // Record metrics
-        if let Some(ref metrics) = self.metrics {
-            metrics.record_api_call(result.is_ok(), latency).await;
-        }
-        
-        result
-    }
-
-    async fn _place_market_order_internal(
-        &self,
-        token_id: &str,
-        amount: f64,
-        side: &str,
-        order_type: Option<&str>,
-    ) -> Result<OrderResponse> {
         if side != "BUY" && side != "SELL" {
             anyhow::bail!("Invalid order side: {}. Must be 'BUY' or 'SELL'", side);
         }
@@ -1499,7 +1440,7 @@ impl PolymarketApi {
         for attempt in 1..=max_retries {
             match clob_sdk::post_market_order(handle, token_id, side, &amount_str, is_buy, ot) {
                 Ok(order_id) => {
-                    log::info!("✅ Posted | Order {} | {} {} @ {}", order_id, side, amount_str, token_id);
+                    eprintln!("   ✅ Posted | Order {}", order_id);
                     return Ok(OrderResponse {
                         order_id: Some(order_id.clone()),
                         status: "LIVE".to_string(),
@@ -1514,7 +1455,6 @@ impl PolymarketApi {
                         anyhow::bail!("Insufficient token balance: {}", e);
                     }
                     if is_allowance && !is_buy && attempt < max_retries {
-                        log::debug!("Allowance issue detected, updating allowance for token {}", token_id);
                         let _ = self.update_balance_allowance_for_sell(token_id).await;
                         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                         continue;

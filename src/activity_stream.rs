@@ -14,47 +14,34 @@ use crate::copy_trading::{
     copy_trade, record_entry, should_copy_trade, CopyTradingConfig, LeaderTrade,
 };
 use crate::web_state;
-use crate::metrics::MetricsCollector;
 use std::collections::HashMap;
 
 const ACTIVITY_WS_URL: &str = "wss://ws-live-data.polymarket.com";
 const PING_INTERVAL_SECS: u64 = 5;
-const INITIAL_RECONNECT_DELAY_SECS: u64 = 1;
-const MAX_RECONNECT_DELAY_SECS: u64 = 60;
+const RECONNECT_DELAY_SECS: u64 = 5;
 const MAX_SEEN: usize = 10_000;
 
 /// Notify UI that state changed (e.g. new trade).
 pub type NotifyTx = broadcast::Sender<()>;
 
-/// Optimized trade parsing with reduced allocations
 fn activity_payload_to_leader_trade(p: &serde_json::Value) -> Option<LeaderTrade> {
-    let asset = p.get("asset")?.as_str()?;
-    let side = p.get("side")?.as_str()?;
-    let size = p.get("size")
-        .and_then(|v| v.as_f64())
-        .or_else(|| p.get("size").and_then(|v| v.as_u64().map(|u| u as f64)))?;
-    let price = p.get("price")
-        .and_then(|v| v.as_f64())
-        .or_else(|| p.get("price").and_then(|v| v.as_u64().map(|u| u as f64)))?;
+    let asset = p.get("asset")?.as_str()?.to_string();
+    let side = p.get("side")?.as_str()?.to_string();
+    let size = p.get("size").and_then(|v| v.as_f64()).or_else(|| p.get("size").and_then(|v| v.as_u64().map(|u| u as f64)))?;
+    let price = p.get("price").and_then(|v| v.as_f64()).or_else(|| p.get("price").and_then(|v| v.as_u64().map(|u| u as f64)))?;
     let timestamp = p.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
     let tx_hash = p.get("transactionHash").and_then(|v| v.as_str()).unwrap_or("");
-    
-    // Pre-allocate string capacity to reduce reallocations
-    let mut id = String::with_capacity(tx_hash.len() + 20);
-    id.push_str(tx_hash);
-    id.push_str(&timestamp.to_string());
-    
-    let condition_id = p.get("conditionId").and_then(|v| v.as_str()).unwrap_or("");
+    let id = format!("{}{}", tx_hash, timestamp);
+    let condition_id = p.get("conditionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let slug = p.get("slug").and_then(|v| v.as_str()).map(String::from);
     let outcome = p.get("outcome").and_then(|v| v.as_str()).map(String::from);
-    
     Some(LeaderTrade {
         id,
-        asset_id: asset.to_string(),
-        market: condition_id.to_string(),
-        side: side.to_string(),
-        size: size.to_string(),
-        price: price.to_string(),
+        asset_id: asset,
+        market: condition_id,
+        side,
+        size: format!("{}", size),
+        price: format!("{}", price),
         match_time: timestamp.to_string(),
         slug,
         outcome,
@@ -70,7 +57,6 @@ async fn run_activity_stream_loop(
     notify_tx: NotifyTx,
     entries: Arc<Mutex<HashMap<String, crate::copy_trading::Entry>>>,
     simulation: bool,
-    metrics: Option<Arc<MetricsCollector>>,
 ) -> Result<()> {
     let (ws_stream, _) = connect_async(ACTIVITY_WS_URL).await?;
     let (mut write, mut read) = ws_stream.split();
@@ -186,11 +172,6 @@ async fn run_activity_stream_loop(
             continue;
         }
 
-        // Calculate volume for metrics
-        let volume_usd = trade.size.parse::<f64>().unwrap_or(0.0) 
-            * trade.price.parse::<f64>().unwrap_or(0.0)
-            * config.copy.size_multiplier;
-        
         match copy_trade(
             &api,
             &trade,
@@ -203,10 +184,6 @@ async fn run_activity_stream_loop(
                 {
                     let mut ent = entries.lock().await;
                     record_entry(&mut *ent, &trade.asset_id, size, price);
-                }
-                // Record successful trade
-                if let Some(ref m) = metrics {
-                    m.record_trade(true, volume_usd).await;
                 }
                 let slug = trade.slug.as_deref().unwrap_or("?");
                 let outcome = trade.outcome.as_deref().unwrap_or("?");
@@ -229,10 +206,6 @@ async fn run_activity_stream_loop(
                 let _ = notify_tx.send(());
             }
             Ok(None) => {
-                // Record successful trade (no-op but counted)
-                if let Some(ref m) = metrics {
-                    m.record_trade(true, 0.0).await;
-                }
                 let slug = trade.slug.as_deref().unwrap_or("?");
                 let outcome = trade.outcome.as_deref().unwrap_or("?");
                 info!(
@@ -254,19 +227,9 @@ async fn run_activity_stream_loop(
                 let _ = notify_tx.send(());
             }
             Err(e) => {
-                // Record failed trade
-                if let Some(ref m) = metrics {
-                    m.record_trade(false, volume_usd).await;
-                }
                 let slug = trade.slug.as_deref().unwrap_or("?");
+                warn!("LIVE | {} {} | from {} | FAILED: {}", trade.side, slug, proxy, e);
                 let outcome = trade.outcome.as_deref().unwrap_or("?");
-                
-                // Structured error logging with context
-                warn!(
-                    "LIVE | {} {} {} | from {} | FAILED: {} | size: {} @ {}",
-                    trade.side, outcome, slug, proxy, e, trade.size, trade.price
-                );
-                
                 web_state::push_trade(
                     web_state.clone(),
                     "LIVE".to_string(),
@@ -297,7 +260,6 @@ pub fn spawn_activity_stream(
     notify_tx: NotifyTx,
     entries: Arc<Mutex<HashMap<String, crate::copy_trading::Entry>>>,
     simulation: bool,
-    metrics: Option<Arc<MetricsCollector>>,
 ) {
     let targets_lower: HashSet<String> = targets.iter().map(|s| s.to_lowercase()).collect();
     let n = targets_lower.len();
@@ -306,9 +268,6 @@ pub fn spawn_activity_stream(
         n
     );
     tokio::spawn(async move {
-        let mut reconnect_delay = INITIAL_RECONNECT_DELAY_SECS;
-        let mut consecutive_failures = 0u32;
-        
         loop {
             match run_activity_stream_loop(
                 targets_lower.clone(),
@@ -318,32 +277,18 @@ pub fn spawn_activity_stream(
                 notify_tx.clone(),
                 entries.clone(),
                 simulation,
-                metrics.clone(),
             )
             .await
             {
-                Ok(()) => {
-                    // Reset delay on successful connection
-                    reconnect_delay = INITIAL_RECONNECT_DELAY_SECS;
-                    consecutive_failures = 0;
-                }
+                Ok(()) => {}
                 Err(e) => {
-                    consecutive_failures += 1;
                     warn!(
-                        "Activity stream error (failure #{}): {} - reconnecting in {}s",
-                        consecutive_failures, e, reconnect_delay
+                        "Activity stream error: {} - reconnecting in {}s",
+                        e, RECONNECT_DELAY_SECS
                     );
-                    
-                    // Record reconnection in metrics
-                    if let Some(ref m) = metrics {
-                        m.record_websocket_reconnect().await;
-                    }
-                    
-                    // Exponential backoff with cap
-                    tokio::time::sleep(tokio::time::Duration::from_secs(reconnect_delay)).await;
-                    reconnect_delay = (reconnect_delay * 2).min(MAX_RECONNECT_DELAY_SECS);
                 }
             }
+            tokio::time::sleep(tokio::time::Duration::from_secs(RECONNECT_DELAY_SECS)).await;
         }
     });
 }

@@ -10,10 +10,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use std::time::Instant;
 
 use crate::api::{DataApiPosition, PolymarketApi};
-use crate::retry::{retry_with_backoff, RetryConfig, is_retryable_error};
 
 
 // ---------- Config (trade.toml) ----------
@@ -189,7 +187,6 @@ pub fn should_copy_trade(config: &CopyTradingConfig, trade: &LeaderTrade) -> boo
 // ---------- Copy trade (place market order) ----------
 
 /// Copy one leader trade: compute amount (with multiplier and buy cap), then place FOK market order.
-/// Uses retry logic with exponential backoff for resilience.
 pub async fn copy_trade(
     api: &PolymarketApi,
     trade: &LeaderTrade,
@@ -226,47 +223,14 @@ pub async fn copy_trade(
         return Ok(None);
     }
 
-    // Use retry logic for order placement with better error context
-    let retry_config = RetryConfig::for_order(is_buy);
-    let asset_id = trade.asset_id.clone();
-    let side = trade.side.clone();
-    let amount = amount_usd_or_shares;
-    let slug = trade.slug.as_deref().unwrap_or("unknown");
-    
-    let start = Instant::now();
-    let result = retry_with_backoff(&retry_config, || {
-        let api = api;
-        let asset_id = asset_id.clone();
-        let side = side.clone();
-        Box::pin(async move {
-            api.place_market_order(&asset_id, amount, &side, Some("FOK"))
-                .await
-                .map_err(|e| format!("{} (asset: {}, side: {}, amount: {:.2})", e, asset_id, side, amount))
-        })
-    })
+    api.place_market_order(
+        &trade.asset_id,
+        amount_usd_or_shares,
+        &trade.side,
+        Some("FOK"),
+    )
     .await
-    .with_context(|| format!(
-        "Failed to copy trade: {} {} {} @ {} (multiplier: {:.2}%)",
-        side, slug, trade.size, trade.price, multiplier * 100.0
-    ));
-    
-    let latency = start.elapsed();
-    match &result {
-        Ok(_) => {
-            log::info!(
-                "✅ Order placed | {} {} | {} @ {} | latency: {:?}",
-                side, slug, trade.size, trade.price, latency
-            );
-        }
-        Err(e) => {
-            log::warn!(
-                "❌ Order failed | {} {} | {} @ {} | latency: {:?} | error: {}",
-                side, slug, trade.size, trade.price, latency, e
-            );
-        }
-    }
-
-    result?;
+    .context("place_market_order failed")?;
 
     if is_buy {
         let price_f = price.to_f64().unwrap_or(0.0);

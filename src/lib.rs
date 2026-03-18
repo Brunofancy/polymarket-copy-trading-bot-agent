@@ -12,10 +12,6 @@ pub mod rtds;
 pub mod activity_stream;
 pub mod simulation;
 pub mod trader;
-pub mod retry;
-pub mod rate_limit;
-pub mod metrics;
-pub mod circuit_breaker;
 
 // Re-export commonly used types
 pub use api::PolymarketApi;

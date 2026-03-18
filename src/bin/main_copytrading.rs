@@ -30,7 +30,6 @@ use polymarket_trading_bot::api::PolymarketApi;
 use polymarket_trading_bot::config::Config;
 use polymarket_trading_bot::copy_trading::{spawn_exit_loop, CopyTradingConfig};
 use polymarket_trading_bot::web_state::{self, SharedState};
-use polymarket_trading_bot::metrics::MetricsCollector;
 
 #[derive(Parser, Debug)]
 #[command(name = "main_copytrading")]
@@ -62,8 +61,6 @@ struct AppState {
     notify: NotifyTx,
     /// Shared client for OpenRouter (connection reuse, pool); keeps agent chat fast.
     openrouter_client: reqwest::Client,
-    /// Metrics collector for performance monitoring
-    metrics: Option<Arc<polymarket_trading_bot::metrics::MetricsCollector>>,
 }
 
 async fn sse_state_updates(State(app): State<AppState>) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
@@ -420,19 +417,6 @@ async fn api_state(State(app): State<AppState>) -> axum::response::Response {
     res
 }
 
-/// Metrics endpoint for monitoring bot performance
-async fn api_metrics(State(app): State<AppState>) -> Result<Json<serde_json::Value>, (StatusCode, &'static str)> {
-    match app.metrics {
-        Some(ref metrics) => {
-            let metrics_data = metrics.get_metrics().await;
-            Ok(Json(serde_json::to_value(metrics_data).map_err(|_| {
-                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize metrics")
-            })?))
-        }
-        None => Err((StatusCode::SERVICE_UNAVAILABLE, "Metrics not available")),
-    }
-}
-
 /// Serve index.html for GET / so the SPA always loads the same entry point.
 async fn serve_index(State(app): State<AppState>) -> Result<Response, (StatusCode, &'static str)> {
     use axum::response::IntoResponse;
@@ -465,7 +449,7 @@ async fn static_asset_mime(req: Request<Body>, next: Next) -> Response {
     res
 }
 
-fn spawn_web_server(state: SharedState, notify: NotifyTx, port: u16, ui_dir: PathBuf, metrics: Option<Arc<polymarket_trading_bot::metrics::MetricsCollector>>) {
+fn spawn_web_server(state: SharedState, notify: NotifyTx, port: u16, ui_dir: PathBuf) {
     let openrouter_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(90))
         .connect_timeout(std::time::Duration::from_secs(10))
@@ -478,13 +462,11 @@ fn spawn_web_server(state: SharedState, notify: NotifyTx, port: u16, ui_dir: Pat
             ui_dir: ui_dir.clone(),
             notify,
             openrouter_client,
-            metrics,
         };
         let serve_dir = ServeDir::new(&ui_dir);
         let app = Router::new()
             .route("/api/state", get(api_state))
             .route("/api/state/stream", get(sse_state_updates))
-            .route("/api/metrics", get(api_metrics))
             .route("/api/leaderboard", get(api_leaderboard))
             .route("/api/agent/providers", get(api_agent_providers))
             .route("/api/agent/chat", post(api_agent_chat))
@@ -539,23 +521,16 @@ async fn main() -> Result<()> {
     }
 
     let simulation = args.simulation || copy_config.simulation;
-    
-    // Initialize metrics collector
-    let metrics = Arc::new(MetricsCollector::new());
-    
-    let api = Arc::new(
-        PolymarketApi::new(
-            config.polymarket.gamma_api_url.clone(),
-            config.polymarket.clob_api_url.clone(),
-            config.polymarket.api_key.clone(),
-            config.polymarket.api_secret.clone(),
-            config.polymarket.api_passphrase.clone(),
-            config.polymarket.private_key.clone(),
-            config.polymarket.proxy_wallet_address.clone(),
-            config.polymarket.signature_type,
-        )
-        .with_metrics(metrics.clone())
-    );
+    let api = Arc::new(PolymarketApi::new(
+        config.polymarket.gamma_api_url.clone(),
+        config.polymarket.clob_api_url.clone(),
+        config.polymarket.api_key.clone(),
+        config.polymarket.api_secret.clone(),
+        config.polymarket.api_passphrase.clone(),
+        config.polymarket.private_key.clone(),
+        config.polymarket.proxy_wallet_address.clone(),
+        config.polymarket.signature_type,
+    ));
 
     let api_auth = api.clone();
     tokio::spawn(async move {
@@ -609,9 +584,8 @@ async fn main() -> Result<()> {
         Arc::new(Mutex::new(HashMap::new()));
 
     info!("Serving UI from: {}", ui_dir.display());
-    spawn_web_server(web_state.clone(), notify_tx.clone(), port, ui_dir, Some(metrics.clone()));
+    spawn_web_server(web_state.clone(), notify_tx.clone(), port, ui_dir);
     info!("UI: http://localhost:{} (or http://<this-host-ip>:{} from another device)", port, port);
-    info!("Metrics: http://localhost:{}/api/metrics", port);
     if !simulation
         && (copy_config.exit.take_profit > 0.0
             || copy_config.exit.stop_loss > 0.0
@@ -633,7 +607,6 @@ async fn main() -> Result<()> {
         notify_tx.clone(),
         entries.clone(),
         simulation,
-        Some(metrics.clone()),
     );
 
     let poll_secs = copy_config.copy.poll_interval_sec.clamp(0.25, 3600.0);
