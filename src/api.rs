@@ -156,7 +156,7 @@ impl PolymarketApi {
                         let funder = self.proxy_wallet_address.clone();
                         *guard = ClobClientState::Creating;
                         let jh = tokio::task::spawn_blocking(move || {
-                            clob_sdk::get_api_connection()?;
+                            // clob_sdk::get_api_connection()?;
                             let chain_id = polygon();
                             clob_sdk::client_create(
                                 &clob_url,

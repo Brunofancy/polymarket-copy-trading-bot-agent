@@ -419,16 +419,16 @@ pub fn update_balance_allowance(handle: u64, token_id: &str, asset_type: &str) -
 }
 
 
-pub fn get_api_connection() -> Result<()> {
-    let lib = load_lib()?;
-    let f: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
-        unsafe { lib.get(b"clob_sdk_get_api_connection") }.context("clob_sdk_get_api_connection not found")?;
-    let ret = unsafe { f() };
-    if ret != 0 {
-        anyhow::bail!("clob_sdk_get_api_connection failed (ret={})", ret);
-    }
-    Ok(())
-}
+// pub fn get_api_connection() -> Result<()> {
+//     let lib = load_lib()?;
+//     let f: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+//         unsafe { lib.get(b"clob_sdk_get_api_connection") }.context("clob_sdk_get_api_connection not found")?;
+//     let ret = unsafe { f() };
+//     if ret != 0 {
+//         anyhow::bail!("clob_sdk_get_api_connection failed (ret={})", ret);
+//     }
+//     Ok(())
+// }
 
 pub fn tick_size(handle: u64, token_id: &str) -> Result<String> {
     let lib = load_lib()?;
