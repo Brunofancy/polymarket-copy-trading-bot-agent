@@ -47,7 +47,8 @@ The design goal isn’t “hit a home run trade”, it’s **durable growth**: d
 
 ---
 
-**By [HyperBuildX](https://t.me/hyperbuildx)** — questions, ideas, and contributions are welcome.
+**Repository:** [github.com/brunobmtx/polymarket-copy-trading-bot-agent](https://github.com/brunobmtx/polymarket-copy-trading-bot-agent)  
+**Contact:** [@snipmaxi](https://t.me/snipmaxi) — questions, ideas, and contributions welcome.
 
 ---
 
@@ -66,9 +67,15 @@ The design goal isn’t “hit a home run trade”, it’s **durable growth**: d
 
 ## Screenshots
 
-| **Dashboard** | **Agent** |
-|:---:|:---:|
-| <img src="https://i.ibb.co/Rkmq13bj/mm-1.png" alt="mm 1" border="0"> | <img src="https://i.ibb.co/HfXx5kwR/mm-2.png" alt="mm 2" border="0"> |
+| Dashboard | Agent | Logs |
+|:---:|:---:|:---:|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Agent](docs/screenshots/agent.png) | ![Logs](docs/screenshots/logs.png) |
+
+| Top Traders | Portfolio | Settings |
+|:---:|:---:|:---:|
+| ![Top Traders](docs/screenshots/toptraders.png) | ![Portfolio](docs/screenshots/portfolio.png) | ![Settings](docs/screenshots/settings.png) |
+
+*To refresh: `cd frontend && trunk build --release`, then `python3 scripts/serve_spa.py` & `npm run screenshots`*
 
 ---
 
@@ -77,8 +84,8 @@ The design goal isn’t “hit a home run trade”, it’s **durable growth**: d
 ### 1. Clone
 
 ```bash
-git clone https://github.com/Krypto-Hashers-Community/polymarket-copytrading-bot-rust-sport-crypto.git
-cd polymarket-copytrading-bot-rust-sport-crypto
+git clone https://github.com/brunobmtx/polymarket-copy-trading-bot-agent.git
+cd polymarket-copy-trading-bot-agent
 ```
 
 ### 2. Configure
@@ -234,11 +241,25 @@ Access from any device on your network at `http://<your-server-ip>:8000`. The bi
 | Path | Role |
 |------|------|
 | `src/bin/main_copytrading.rs` | Entrypoint, HTTP server, agent endpoints |
-| `src/activity_stream.rs` | WebSocket client for real-time trades |
-| `src/copy_trading.rs` | Config, filters, copy logic, exit loop, position diff |
+| **Core** | |
 | `src/api.rs` | Polymarket CLOB/Data API client |
 | `src/clob_sdk.rs` | FFI bindings to the CLOB SDK `.so` |
+| `src/config.rs` | CLI args, config loading |
+| `src/models.rs` | Market, Token, OrderBook, TokenPrice, etc. |
+| **Trading & strategy** | |
+| `src/copy_trading.rs` | Config, filters, copy logic, exit loop, position diff |
+| `src/trader.rs` | Order placement, portfolio sync |
+| `src/simulation.rs` | Simulated orders, price trend tracking |
+| `src/backtest.rs` | Backtest engine |
+| `src/merge.rs` | Merge up/down amounts |
+| **Monitoring** | |
+| `src/activity_stream.rs` | WebSocket client for real-time trades |
+| `src/detector.rs` | Price detector, buy opportunities |
+| `src/monitor.rs` | Market monitor, snapshots |
+| `src/rtds.rs` | Chainlink BTC price feed |
+| **Web & utilities** | |
 | `src/web_state.rs` | Shared state for UI, `/api/state` JSON + SSE |
+| `src/logging.rs` | History file, trading event logging |
 | `frontend/` | Leptos (Rust → WASM): dashboard, agent, logs, portfolio, settings |
 
 ---

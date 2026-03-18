@@ -1,0 +1,28 @@
+{
+  "name": "polymarket-trading-bot-rust",
+  "version": "1.0.0",
+  "description": "<p align=\"center\">   <h1 align=\"center\">Polymarket CopyTrading Bot</h1>   <p align=\"center\">     <strong>Mirror elite traders, monitor your book, and get AI-assisted research from a single, fast interface.</strong>   </p>   <p align=\"center\">     Rust backend &middot; Real-time WebSocket &middot; Web dashboard &middot; Built-in AI Agent   </p> </p>",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "screenshots": "node scripts/screenshot.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brunobmtx/polymarket-copy-trading-bot-agent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/brunobmtx/polymarket-copy-trading-bot-agent/issues"
+  },
+  "homepage": "https://github.com/brunobmtx/polymarket-copy-trading-bot-agent#readme",
+  "devDependencies": {
+    "playwright": "^1.58.2"
+  }
+}

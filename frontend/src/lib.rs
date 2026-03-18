@@ -1122,6 +1122,31 @@ fn SettingsPage(
                         </div>
                     </div>
                 </section>
+
+                <section class="settings-section">
+                    <h2 class="settings-section-title">"Project Architecture"</h2>
+                    <div class="settings-section-content">
+                        <p class="text-xs text-muted mb-3">"Backend module layout (Rust)."</p>
+                        <div class="architecture-grid">
+                            <div class="architecture-group">
+                                <span class="architecture-group-title">"Core"</span>
+                                <span class="architecture-modules">"api, clob_sdk, config, models"</span>
+                            </div>
+                            <div class="architecture-group">
+                                <span class="architecture-group-title">"Trading & strategy"</span>
+                                <span class="architecture-modules">"backtest, merge, simulation, trader"</span>
+                            </div>
+                            <div class="architecture-group">
+                                <span class="architecture-group-title">"Monitoring"</span>
+                                <span class="architecture-modules">"activity_stream, detector, monitor, rtds"</span>
+                            </div>
+                            <div class="architecture-group">
+                                <span class="architecture-group-title">"Web & utilities"</span>
+                                <span class="architecture-modules">"copy_trading, web_state, logging"</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
         </div>
     }

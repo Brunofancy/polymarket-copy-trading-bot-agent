@@ -395,6 +395,10 @@ body {
 .settings-target-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .settings-color-input { width: 2rem; height: 2rem; cursor: pointer; border-radius: 0.375rem; border: 1px solid var(--border); background: transparent; padding: 0; }
 .settings-address { font-size: 0.75rem; color: var(--text); word-break: break-all; }
+.architecture-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem; }
+.architecture-group { display: flex; flex-direction: column; gap: 0.25rem; padding: 0.75rem; background: var(--surface-elevated); border-radius: 0.375rem; border: 1px solid var(--border); }
+.architecture-group-title { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); }
+.architecture-modules { font-size: 0.75rem; font-family: ui-monospace, monospace; color: var(--text-muted); word-break: break-word; }
 
 /* Top traders */
 .toptraders-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }

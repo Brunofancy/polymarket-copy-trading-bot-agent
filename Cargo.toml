@@ -4,9 +4,14 @@ version = "0.1.0"
 edition = "2021"
 default-run = "main_sports_trailing"
 
+# Main trading bots
 [[bin]]
 name = "main_sports_trailing"
 path = "src/bin/main_sports_trailing.rs"
+
+[[bin]]
+name = "main_trailing"
+path = "src/bin/main_trailing.rs"
 
 [[bin]]
 name = "main_dual_limit_045_same_size"
@@ -17,28 +22,22 @@ name = "main_dual_limit_045_5m_btc"
 path = "src/bin/main_dual_limit_045_5m_btc.rs"
 
 [[bin]]
-name = "main_trailing"
-path = "src/bin/main_trailing.rs"
+name = "main_copytrading"
+path = "src/bin/main_copytrading.rs"
 
+# Backtesting
 [[bin]]
 name = "backtest"
 path = "src/bin/backtest.rs"
 
-[[bin]]
-name = "test_predict_fun"
-path = "src/bin/test_predict_fun.rs"
-
-[[bin]]
-name = "test_sell"
-path = "src/bin/test_sell.rs"
-
-[[bin]]
-name = "test_redeem"
-path = "src/bin/test_redeem.rs"
-
+# Test utilities
 [[bin]]
 name = "test_allowance"
 path = "src/bin/test_allowance.rs"
+
+[[bin]]
+name = "test_cash_balance"
+path = "src/bin/test_cash_balance.rs"
 
 [[bin]]
 name = "test_limit_order"
@@ -49,8 +48,20 @@ name = "test_merge"
 path = "src/bin/test_merge.rs"
 
 [[bin]]
-name = "main_copytrading"
-path = "src/bin/main_copytrading.rs"
+name = "test_multiple_orders"
+path = "src/bin/test_multiple_orders.rs"
+
+[[bin]]
+name = "test_predict_fun"
+path = "src/bin/test_predict_fun.rs"
+
+[[bin]]
+name = "test_redeem"
+path = "src/bin/test_redeem.rs"
+
+[[bin]]
+name = "test_sell"
+path = "src/bin/test_sell.rs"
 
 [dependencies]
 tokio = { version = "1.35", features = ["full"] }
