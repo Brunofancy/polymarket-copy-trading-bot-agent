@@ -47,7 +47,7 @@ The design goal isn’t “hit a home run trade”, it’s **durable growth**: d
 
 ---
 
-**By [FemtoDev](https://t.me/femtodev)** — questions, ideas, and contributions are welcome.
+**By [HyperBuildX](https://t.me/hyperbuildx)** — questions, ideas, and contributions are welcome.
 
 ---
 
