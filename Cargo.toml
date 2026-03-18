@@ -2,7 +2,11 @@
 name = "polymarket-trading-bot"
 version = "0.1.0"
 edition = "2021"
-default-run = "main_dual_limit_045_same_size"
+default-run = "main_sports_trailing"
+
+[[bin]]
+name = "main_sports_trailing"
+path = "src/bin/main_sports_trailing.rs"
 
 [[bin]]
 name = "main_dual_limit_045_same_size"
@@ -44,10 +48,14 @@ path = "src/bin/test_limit_order.rs"
 name = "test_merge"
 path = "src/bin/test_merge.rs"
 
+[[bin]]
+name = "main_copytrading"
+path = "src/bin/main_copytrading.rs"
+
 [dependencies]
 tokio = { version = "1.35", features = ["full"] }
-reqwest = { version = "0.11", features = ["json"] }
-tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -66,3 +74,9 @@ alloy-contract = "1.3"
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1.10"
 libloading = "0.8"
+toml = "0.8"
+axum = { version = "0.7", features = ["json"] }
+tower = "0.4"
+async-stream = "0.3"
+tower-http = { version = "0.5", features = ["fs"] }
+dotenvy = "0.15"

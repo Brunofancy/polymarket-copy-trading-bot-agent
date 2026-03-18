@@ -1,0 +1,44 @@
+name: TagBot
+
+on:
+  issue_comment:
+    types:
+      - created
+  workflow_dispatch:
+    inputs:
+      lookback:
+        default: "3"
+  schedule:
+    - cron: "0 0 * * *"
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  deployments: read
+  issues: read
+  discussions: read
+  packages: read
+  pages: read
+  pull-requests: read
+  repository-projects: read
+  security-events: read
+  statuses: read
+
+jobs:
+  TagBot:
+    if: github.event_name == 'workflow_dispatch' || github.actor == 'JuliaTagBot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: JuliaRegistries/TagBot@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ssh: ${{ secrets.DOCUMENTER_KEY }}
+          # Create release notes from conventional commits
+          changelog: |
+            ## What's Changed
+
+            {{ CHANGELOG }}
+
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/{{ PREVIOUS }}...{{ CURRENT }}

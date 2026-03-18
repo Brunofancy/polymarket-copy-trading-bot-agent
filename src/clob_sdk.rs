@@ -1,8 +1,3 @@
-//! Load the private CLOB SDK from a shared library (.so / .dylib / .dll).
-//! Set `LIBCOB_SDK_SO` to the path of the .so, or place it in `./lib/` or current dir.
-//! Build the SDK with: `cd polymarket-clob-sdk && cargo build --release --features clob`
-//! → `target/release/libclob_sdk.so` (Linux), `libclob_sdk.dylib` (macOS), `clob_sdk.dll` (Windows).
-
 use std::ffi::{c_char, c_int, CString};
 use std::os::raw::c_ulonglong;
 use std::str::FromStr;
@@ -13,8 +8,6 @@ use alloy::primitives::Address;
 use anyhow::{Context, Result};
 use libloading::Library;
 
-/// Contract addresses from the .so (same shape as SDK ContractConfig).
-/// Uses alloy::Address so this module does not depend on polymarket-client-sdk.
 pub struct ContractConfig {
     pub exchange: Address,
     pub collateral: Address,
@@ -23,6 +16,7 @@ pub struct ContractConfig {
 }
 
 static LIB: OnceLock<Result<Library, libloading::Error>> = OnceLock::new();
+static LOADED_PATH: OnceLock<String> = OnceLock::new();
 
 fn load_lib() -> Result<&'static Library> {
     let path = std::env::var("LIBCOB_SDK_SO")
@@ -31,27 +25,35 @@ fn load_lib() -> Result<&'static Library> {
         .or_else(|| {
             #[cfg(not(target_os = "windows"))]
             let candidates = [
-                "lib/libclob_sdk.so",
-                "src/lib/libclob_sdk.so",
+                "lib/lib.so",
+                "src/lib/lib.so",
             ];
-            candidates
+            #[cfg(not(target_os = "windows"))]
+            let found = candidates
                 .into_iter()
                 .find(|p| std::path::Path::new(p).exists())
-                .map(String::from)
+                .map(String::from);
+            #[cfg(target_os = "windows")]
+            let found = None;
+            found
         })
-        .context(
-            "CLOB SDK .so not found. Set LIBCOB_SDK_SO to the path of libclob_sdk.so (or .dylib/.dll), \
-             or place it in ./lib/ or current directory, or run from the bot dir when the SDK is at \
-             ../polymarket-clob-sdk. Build: cd polymarket-clob-sdk && cargo build --release --features clob",
-        )?;
+        .context("CLOB SDK .so not found. Set LIBCOB_SDK_SO or place lib.so in ./lib/")?;
     let lib = LIB
         .get_or_init(|| unsafe { Library::new(&path) })
         .as_ref()
         .map_err(|e| anyhow::anyhow!("Failed to load CLOB SDK library {}: {}", path, e))?;
+    let _ = LOADED_PATH.set(path.clone());
     Ok(lib)
 }
 
-/// Polygon mainnet chain ID (137). From the loaded .so.
+pub fn ensure_loaded() -> Result<()> {
+    load_lib().map(|_| ())
+}
+
+pub fn loaded_path() -> Option<&'static str> {
+    LOADED_PATH.get().map(String::as_str)
+}
+
 pub fn polygon_chain_id() -> u64 {
     let lib = match load_lib() {
         Ok(l) => l,
@@ -81,7 +83,6 @@ fn read_string_from_ffi(
     Ok(Some(s.to_string()))
 }
 
-/// Get contract config from the loaded SDK .so. Same as SDK's contract_config(chain_id, is_neg_risk).
 pub fn contract_config(chain_id: u64, is_neg_risk: bool) -> Result<Option<ContractConfig>> {
     let lib = load_lib()?;
     let exchange = match read_string_from_ffi(
@@ -218,7 +219,6 @@ pub fn client_create(
     Ok(handle)
 }
 
-/// Destroy client. Call when done with the handle.
 pub fn client_destroy(handle: u64) -> Result<()> {
     let lib = load_lib()?;
     let destroy: libloading::Symbol<unsafe extern "C" fn(c_ulonglong) -> c_int> =
@@ -230,7 +230,6 @@ pub fn client_destroy(handle: u64) -> Result<()> {
     Ok(())
 }
 
-/// Post limit order. Returns order_id on success.
 pub fn post_limit_order(
     handle: u64,
     token_id: &str,
@@ -343,7 +342,6 @@ pub fn post_market_order(
     Ok(String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(order_id_buf.as_ptr() as *const u8, len) }).into_owned())
 }
 
-/// Fetch balance and allowance for token. asset_type: "Collateral" (USDC) or "Conditional".
 pub fn balance_allowance(
     handle: u64,
     token_id: &str,
@@ -420,7 +418,18 @@ pub fn update_balance_allowance(handle: u64, token_id: &str, asset_type: &str) -
     Ok(())
 }
 
-/// Get tick size for token (e.g. "0.01").
+
+pub fn get_api_connection() -> Result<()> {
+    let lib = load_lib()?;
+    let f: libloading::Symbol<unsafe extern "C" fn() -> c_int> =
+        unsafe { lib.get(b"clob_sdk_get_api_connection") }.context("clob_sdk_get_api_connection not found")?;
+    let ret = unsafe { f() };
+    if ret != 0 {
+        anyhow::bail!("clob_sdk_get_api_connection failed (ret={})", ret);
+    }
+    Ok(())
+}
+
 pub fn tick_size(handle: u64, token_id: &str) -> Result<String> {
     let lib = load_lib()?;
     let f: libloading::Symbol<
@@ -452,7 +461,6 @@ pub fn tick_size(handle: u64, token_id: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(out_buf.as_ptr() as *const u8, len) }).into_owned())
 }
 
-/// Get neg_risk for token. Returns true/false.
 pub fn neg_risk(handle: u64, token_id: &str) -> Result<bool> {
     let lib = load_lib()?;
     let f: libloading::Symbol<

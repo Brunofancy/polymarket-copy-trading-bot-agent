@@ -1,14 +1,21 @@
 pub mod api;
 pub mod clob_sdk;
 pub mod backtest;
-pub mod detector;
 pub mod config;
+pub mod copy_trading;
+pub mod detector;
+pub mod web_state;
 pub mod merge;
 pub mod models;
 pub mod monitor;
 pub mod rtds;
+pub mod activity_stream;
 pub mod simulation;
 pub mod trader;
+pub mod retry;
+pub mod rate_limit;
+pub mod metrics;
+pub mod circuit_breaker;
 
 // Re-export commonly used types
 pub use api::PolymarketApi;

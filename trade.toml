@@ -1,0 +1,40 @@
+# CLOB API base URL (mainnet)
+clob_host = "https://clob.polymarket.com"
+
+chain_id = 137
+
+# Web UI port
+port = 8000
+
+# When true, log trades but do not execute (use --simulation or set to false for live)
+simulation = false
+
+[copy]
+# Leader address(es) to copy
+target_address = [
+    "0x37c1874a60d348903594a96703e0507c518fc53a",
+    "0x204f72f35326db932158cba6adff0b9a1da95e14",
+    "0x63ce342161250d705dc0b16df89036c8e5f9ba9a",
+    "0xb45a797faa52b0fd8adc56d30382022b7b12192c",
+    "0x2a2c53bd278c04da9962fcf96490e17f3dfb9bc1",
+    "0xa1aa96c9d7bba38aba523f7e5e73bf69053cf2b6",
+    "0xfcc373f054f1cc1c395913c81e4b6cee710f97ba"
+]
+revert_trade = false
+size_multiplier = 0.01
+# How often to check targets' positions (seconds). Can use decimals, e.g. 0.5 = twice per second.
+poll_interval_sec = 0.5
+
+[exit]
+take_profit = 0
+stop_loss = 0
+trailing_stop = 0
+
+[filter]
+buy_amount_limit_in_usd = 0
+entry_trade_sec = 0
+trade_sec_from_resolve = 0
+
+[ui]
+delta_highlight_sec = 10
+delta_animation_sec = 2

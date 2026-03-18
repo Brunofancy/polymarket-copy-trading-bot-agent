@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>FastPCT - Fastest Polymarket Copy Trading Bot</title>
+    <link data-trunk rel="rust" data-wasm-opt="z"/>
+    <link data-trunk rel="css" href="style.css"/>
+  </head>
+  <body>
+    <div id="loading-fallback" style="position:fixed;inset:0;background:#111;color:#ccc;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;flex-direction:column;gap:0.5rem;">
+      <span>Loading FastPCT…</span>
+      <span id="loading-error" style="font-size:0.875rem;color:#888;display:none;"></span>
+    </div>
+    <script>
+      (function(){
+        var fallback = document.getElementById('loading-fallback');
+        var errEl = document.getElementById('loading-error');
+        function hideFallback(){ if(fallback) fallback.style.display = 'none'; }
+        function showError(msg){ if(errEl){ errEl.style.display='block'; errEl.style.color='#f66'; errEl.textContent=msg; } }
+        window.addEventListener('TrunkApplicationStarted', hideFallback);
+        window.addEventListener('error', function(ev){ showError('Error: ' + (ev.message || ev.type)); });
+        window.addEventListener('unhandledrejection', function(ev){
+          var msg = (ev.reason && (ev.reason.message || ev.reason.toString)) ? (ev.reason.message || ev.reason.toString()) : String(ev.reason);
+          showError('Load failed: ' + msg);
+        });
+        setTimeout(function(){
+          if(fallback && fallback.style.display !== 'none'){
+            showError('App did not start. Open F12 → Console for the real error, then hard refresh (Ctrl+Shift+R).');
+          }
+        }, 4000);
+      })();
+    </script>
+  </body>
+</html>

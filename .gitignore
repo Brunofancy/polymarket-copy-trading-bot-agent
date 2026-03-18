@@ -1,7 +1,32 @@
-/target
+# Rust
+/target/
 **/*.rs.bk
-Cargo.lock
-config.json
-*.log
-history.toml
+
+# Secrets and local config (never commit keys)
 .env
+.env.*
+!.env.example
+config.json
+*.pem
+
+# Logs and runtime
+*.log
+log.txt
+history.toml
+
+# Leptos / Trunk frontend build
+frontend/dist/
+frontend/target/
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cargo.lock is usually committed for apps (reproducible builds)

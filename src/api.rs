@@ -13,9 +13,13 @@ use log::{warn, info, error};
 use std::sync::Arc;
 
 use crate::clob_sdk;
+use crate::rate_limit::RateLimiter;
+use crate::metrics::MetricsCollector;
+use crate::circuit_breaker::CircuitBreaker;
 use alloy::signers::local::LocalSigner;
 use alloy::signers::Signer as _;
 use alloy::primitives::Address as AlloyAddress;
+use std::time::Instant;
 
 // CTF (Conditional Token Framework) imports for redemption
 // Based on docs: https://docs.polymarket.com/developers/builders/relayer-client#redeem-positions
@@ -47,6 +51,17 @@ sol! {
 
 type HmacSha256 = Hmac<Sha256>;
 
+#[derive(Debug, Clone)]
+pub struct DataApiPosition {
+    pub asset: String,
+    pub size: f64,
+    pub cur_price: f64,
+    pub condition_id: Option<String>,
+    pub end_date: Option<String>,
+    pub slug: Option<String>,
+    pub outcome: Option<String>,
+}
+
 /// Polygon chain ID from clob_sdk (137).
 fn polygon() -> u64 {
     clob_sdk::polygon()
@@ -65,8 +80,21 @@ pub struct PolymarketApi {
     signature_type: Option<u8>, // 0 = EOA, 1 = Proxy, 2 = GnosisSafe
     // Track if authentication was successful at startup
     authenticated: Arc<tokio::sync::Mutex<bool>>,
-    /// CLOB client handle from clob_sdk (created in authenticate(), used for orders/balance).
-    clob_client_handle: Arc<tokio::sync::Mutex<Option<u64>>>,
+    clob_client_state: Arc<tokio::sync::Mutex<ClobClientState>>,
+    clob_client_notify: Arc<tokio::sync::Notify>,
+    // Rate limiting for API calls
+    rate_limiter: RateLimiter,
+    // Circuit breaker for resilience
+    circuit_breaker: CircuitBreaker,
+    // Metrics collector (optional, can be None)
+    metrics: Option<Arc<MetricsCollector>>,
+}
+
+#[derive(Clone)]
+enum ClobClientState {
+    Empty,
+    Creating,
+    Ready(u64),
 }
 
 impl PolymarketApi {
@@ -96,55 +124,101 @@ impl PolymarketApi {
             proxy_wallet_address,
             signature_type,
             authenticated: Arc::new(tokio::sync::Mutex::new(false)),
-            clob_client_handle: Arc::new(tokio::sync::Mutex::new(None)),
+            clob_client_state: Arc::new(tokio::sync::Mutex::new(ClobClientState::Empty)),
+            clob_client_notify: Arc::new(tokio::sync::Notify::new()),
+            rate_limiter: RateLimiter::for_clob_api(),
+            circuit_breaker: CircuitBreaker::for_clob_api(),
+            metrics: None,
         }
     }
 
-    /// Ensure CLOB client is created and return handle. Call after authenticate() or when placing orders/checking balance.
-    fn ensure_clob_client(&self) -> Result<u64> {
-        let mut guard = self.clob_client_handle.try_lock()
-            .map_err(|_| anyhow::anyhow!("CLOB client handle lock contested"))?;
-        if let Some(h) = *guard {
-            return Ok(h);
-        }
-        let private_key = self.private_key.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Private key is required. Please set private_key in config.json"))?;
-        let api_key = self.api_key.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("API key is required for CLOB client"))?;
-        let api_secret = self.api_secret.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("API secret is required for CLOB client"))?;
-        let api_passphrase = self.api_passphrase.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("API passphrase is required for CLOB client"))?;
-        let sig_type = match (self.proxy_wallet_address.is_some(), self.signature_type) {
-            (true, Some(0)) => anyhow::bail!("proxy_wallet_address is set but signature_type is 0 (EOA). Use 1 (POLY_PROXY) or 2 (GNOSIS_SAFE)."),
-            (true, None) => {
-                eprintln!("⚠️  proxy_wallet_address set but signature_type not specified; defaulting to 1 (POLY_PROXY)");
-                1u8
+    /// Set metrics collector for tracking API performance
+    pub fn with_metrics(mut self, metrics: Arc<MetricsCollector>) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
+    async fn ensure_clob_client(&self) -> Result<u64> {
+        let notify = Arc::clone(&self.clob_client_notify);
+
+        loop {
+            let (is_creator, jh) = {
+                let mut guard = self.clob_client_state.lock().await;
+                match &*guard {
+                    ClobClientState::Ready(h) => return Ok(*h),
+                    ClobClientState::Creating => {
+                        drop(guard);
+                        notify.notified().await;
+                        continue;
+                    }
+                    ClobClientState::Empty => {
+                        let clob_url = self.clob_url.clone();
+                        let private_key = self.private_key.clone()
+                            .ok_or_else(|| anyhow::anyhow!("Private key is required. Please set private_key in config.json"))?;
+                        let api_key = self.api_key.clone()
+                            .ok_or_else(|| anyhow::anyhow!("API key is required for CLOB client"))?;
+                        let api_secret = self.api_secret.clone()
+                            .ok_or_else(|| anyhow::anyhow!("API secret is required for CLOB client"))?;
+                        let api_passphrase = self.api_passphrase.clone()
+                            .ok_or_else(|| anyhow::anyhow!("API passphrase is required for CLOB client"))?;
+                        let sig_type = match (self.proxy_wallet_address.is_some(), self.signature_type) {
+                            (true, Some(0)) => anyhow::bail!("proxy_wallet_address is set but signature_type is 0 (EOA). Use 1 (POLY_PROXY) or 2 (GNOSIS_SAFE)."),
+                            (true, None) => {
+                                eprintln!("⚠️  proxy_wallet_address set but signature_type not specified; defaulting to 1 (POLY_PROXY)");
+                                1u8
+                            }
+                            (true, Some(1)) | (true, Some(2)) => self.signature_type.unwrap(),
+                            (false, Some(0)) | (false, None) => 0u8,
+                            (false, Some(1)) | (false, Some(2)) => anyhow::bail!("signature_type {} requires proxy_wallet_address", self.signature_type.unwrap()),
+                            (_, Some(n)) => anyhow::bail!("Invalid signature_type: {}. Must be 0, 1, or 2", n),
+                        };
+                        let funder = self.proxy_wallet_address.clone();
+                        *guard = ClobClientState::Creating;
+                        let jh = tokio::task::spawn_blocking(move || {
+                            clob_sdk::get_api_connection()?;
+                            let chain_id = polygon();
+                            clob_sdk::client_create(
+                                &clob_url,
+                                &private_key,
+                                chain_id,
+                                funder.as_deref(),
+                                sig_type,
+                                &api_key,
+                                &api_secret,
+                                &api_passphrase,
+                            )
+                        });
+                        (true, jh)
+                    }
+                }
+            };
+
+            if !is_creator {
+                continue;
             }
-            (true, Some(1)) | (true, Some(2)) => self.signature_type.unwrap(),
-            (false, Some(0)) | (false, None) => 0u8,
-            (false, Some(1)) | (false, Some(2)) => anyhow::bail!("signature_type {} requires proxy_wallet_address", self.signature_type.unwrap()),
-            (_, Some(n)) => anyhow::bail!("Invalid signature_type: {}. Must be 0, 1, or 2", n),
-        };
-        let funder = self.proxy_wallet_address.as_deref();
-        let handle = clob_sdk::client_create(
-            &self.clob_url,
-            private_key,
-            polygon(),
-            funder,
-            sig_type,
-            api_key,
-            api_secret,
-            api_passphrase,
-        )?;
-        *guard = Some(handle);
-        Ok(handle)
+
+            let handle = match jh.await {
+                Ok(Ok(h)) => h,
+                Ok(Err(e)) => {
+                    let mut guard = self.clob_client_state.lock().await;
+                    *guard = ClobClientState::Empty;
+                    return Err(e);
+                }
+                Err(e) => return Err(anyhow::anyhow!("CLOB client creation task panicked: {}", e)),
+            };
+
+            {
+                let mut guard = self.clob_client_state.lock().await;
+                *guard = ClobClientState::Ready(handle);
+            }
+            self.clob_client_notify.notify_waiters();
+            return Ok(handle);
+        }
     }
 
     /// Authenticate with Polymarket CLOB API at startup (creates CLOB client via clob_sdk).
-    /// Equivalent to JavaScript: new ClobClient(HOST, CHAIN_ID, signer, apiCreds, signatureType, funderAddress)
     pub async fn authenticate(&self) -> Result<()> {
-        let _ = self.ensure_clob_client()?;
+        let _ = self.ensure_clob_client().await?;
         *self.authenticated.lock().await = true;
         eprintln!("✅ Successfully authenticated with Polymarket CLOB API (clob_sdk)");
         eprintln!("   ✓ Private key: Valid");
@@ -317,8 +391,7 @@ impl PolymarketApi {
         Ok(all_markets)
     }
 
-    /// Get market by slug (e.g., "btc-updown-15m-1767726000")
-    /// The API returns an event object with a markets array
+    /// Get market by slug
     pub async fn get_market_by_slug(&self, slug: &str) -> Result<Market> {
         let url = format!("{}/events/slug/{}", self.gamma_url, slug);
         
@@ -456,13 +529,11 @@ impl PolymarketApi {
         }
     }
 
-    /// Place an order using clob_sdk (post_limit_order).
-    /// Equivalent to JavaScript: client.createAndPostOrder(userOrder)
     pub async fn place_order(&self, order: &OrderRequest) -> Result<OrderResponse> {
         if order.side != "BUY" && order.side != "SELL" {
             anyhow::bail!("Invalid order side: {}. Must be 'BUY' or 'SELL'", order.side);
         }
-        let handle = self.ensure_clob_client()?;
+        let handle = self.ensure_clob_client().await?;
         eprintln!("📤 Creating and posting order: {} {} {} @ {}", order.side, order.size, order.token_id, order.price);
         let order_id = clob_sdk::post_limit_order(handle, &order.token_id, &order.side, &order.price, &order.size)?;
         eprintln!("✅ Order placed successfully! Order ID: {}", order_id);
@@ -478,7 +549,7 @@ impl PolymarketApi {
         if orders.is_empty() {
             return Ok(Vec::new());
         }
-        let handle = self.ensure_clob_client()?;
+        let handle = self.ensure_clob_client().await?;
         eprintln!("📤 Posting {} limit orders...", orders.len());
         let mut out = Vec::with_capacity(orders.len());
         for (i, order) in orders.iter().enumerate() {
@@ -803,7 +874,7 @@ impl PolymarketApi {
     /// Check USDC balance and allowance for buying tokens (via clob_sdk).
     /// Returns (usdc_balance, usdc_allowance) as Decimal values.
     pub async fn check_usdc_balance_allowance(&self) -> Result<(rust_decimal::Decimal, rust_decimal::Decimal)> {
-        let handle = self.ensure_clob_client()?;
+        let handle = self.ensure_clob_client().await?;
         let (balance_str, allowance_str) = clob_sdk::balance_allowance(handle, "", "Collateral")?;
         let balance = rust_decimal::Decimal::from_str(balance_str.trim()).unwrap_or(rust_decimal::Decimal::ZERO);
         let allowance = rust_decimal::Decimal::from_str(allowance_str.trim()).unwrap_or(rust_decimal::Decimal::ZERO);
@@ -812,14 +883,14 @@ impl PolymarketApi {
 
     /// Check token balance only (for redemption/portfolio scanning) via clob_sdk.
     pub async fn check_balance_only(&self, token_id: &str) -> Result<rust_decimal::Decimal> {
-        let handle = self.ensure_clob_client()?;
+        let handle = self.ensure_clob_client().await?;
         let (balance_str, _) = clob_sdk::balance_allowance(handle, token_id, "Conditional")?;
         rust_decimal::Decimal::from_str(balance_str.trim()).context("Failed to parse balance")
     }
 
     /// Check token balance and allowance before selling (via clob_sdk).
     pub async fn check_balance_allowance(&self, token_id: &str) -> Result<(rust_decimal::Decimal, rust_decimal::Decimal)> {
-        let handle = self.ensure_clob_client()?;
+        let handle = self.ensure_clob_client().await?;
         let (balance_str, allowance_str) = clob_sdk::balance_allowance(handle, token_id, "Conditional")?;
         let balance = rust_decimal::Decimal::from_str(balance_str.trim()).context("Parse balance")?;
         let allowance = rust_decimal::Decimal::from_str(allowance_str.trim()).unwrap_or(rust_decimal::Decimal::ZERO);
@@ -840,7 +911,7 @@ impl PolymarketApi {
 
     /// Refresh cached allowance for outcome token before selling (via clob_sdk).
     pub async fn update_balance_allowance_for_sell(&self, token_id: &str) -> Result<()> {
-        let handle = self.ensure_clob_client()?;
+        let handle = self.ensure_clob_client().await?;
         clob_sdk::update_balance_allowance(handle, token_id, "Conditional")
     }
 
@@ -1357,20 +1428,52 @@ impl PolymarketApi {
         }
     }
 
-    /// Place a market order (FOK/FAK) for immediate execution
-    /// 
-    /// This is used for emergency selling or when you want immediate execution at market price.
-    /// Equivalent to JavaScript: client.createAndPostMarketOrder(userMarketOrder)
-    /// 
-    /// Market orders execute immediately at the best available price:
-    /// - FOK (Fill-or-Kill): Order must fill completely or be cancelled
-    /// - FAK (Fill-and-Kill): Order fills as much as possible, remainder is cancelled
     pub async fn place_market_order(
         &self,
         token_id: &str,
         amount: f64,
         side: &str,
         order_type: Option<&str>, // "FOK" or "FAK", defaults to FOK
+    ) -> Result<OrderResponse> {
+        // Check circuit breaker
+        if self.circuit_breaker.is_open().await {
+            anyhow::bail!("Circuit breaker is open - API calls temporarily disabled due to high failure rate");
+        }
+        
+        // Rate limit API calls
+        self.rate_limiter.acquire().await;
+        
+        let start = Instant::now();
+        let result = self._place_market_order_internal(token_id, amount, side, order_type).await;
+        let latency = start.elapsed();
+        
+        // Update circuit breaker based on result
+        match &result {
+            Ok(_) => {
+                self.circuit_breaker.record_success().await;
+            }
+            Err(e) => {
+                // Only record failure if it's a retryable error
+                if crate::retry::is_retryable_error(&e.to_string()) {
+                    self.circuit_breaker.record_failure().await;
+                }
+            }
+        }
+        
+        // Record metrics
+        if let Some(ref metrics) = self.metrics {
+            metrics.record_api_call(result.is_ok(), latency).await;
+        }
+        
+        result
+    }
+
+    async fn _place_market_order_internal(
+        &self,
+        token_id: &str,
+        amount: f64,
+        side: &str,
+        order_type: Option<&str>,
     ) -> Result<OrderResponse> {
         if side != "BUY" && side != "SELL" {
             anyhow::bail!("Invalid order side: {}. Must be 'BUY' or 'SELL'", side);
@@ -1391,12 +1494,12 @@ impl PolymarketApi {
         } else if amount <= 0.0 {
             anyhow::bail!("Invalid shares amount: {}. Must be > 0.", amount);
         }
-        let handle = self.ensure_clob_client()?;
+        let handle = self.ensure_clob_client().await?;
         let max_retries = if is_buy { 1 } else { 3 };
         for attempt in 1..=max_retries {
             match clob_sdk::post_market_order(handle, token_id, side, &amount_str, is_buy, ot) {
                 Ok(order_id) => {
-                    eprintln!("   ✅ Posted | Order {}", order_id);
+                    log::info!("✅ Posted | Order {} | {} {} @ {}", order_id, side, amount_str, token_id);
                     return Ok(OrderResponse {
                         order_id: Some(order_id.clone()),
                         status: "LIVE".to_string(),
@@ -1411,6 +1514,7 @@ impl PolymarketApi {
                         anyhow::bail!("Insufficient token balance: {}", e);
                     }
                     if is_allowance && !is_buy && attempt < max_retries {
+                        log::debug!("Allowance issue detected, updating allowance for token {}", token_id);
                         let _ = self.update_balance_allowance_for_sell(token_id).await;
                         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                         continue;
@@ -1430,7 +1534,7 @@ impl PolymarketApi {
         if orders.is_empty() {
             return Ok(Vec::new());
         }
-        let handle = self.ensure_clob_client()?;
+        let handle = self.ensure_clob_client().await?;
         let mut out = Vec::with_capacity(orders.len());
         for (i, (token_id, amount, side, order_type)) in orders.iter().enumerate() {
             let ot = order_type.unwrap_or("FOK");
@@ -1514,12 +1618,10 @@ impl PolymarketApi {
         Ok(order_response)
     }
 
-    /// True if API credentials (api_key, api_secret, api_passphrase) are set. Required for CLOB-authenticated calls (e.g. balance check, portfolio scan fallback).
     pub fn has_api_credentials(&self) -> bool {
         self.api_key.is_some() && self.api_secret.is_some() && self.api_passphrase.is_some()
     }
 
-    /// Return the wallet address to use for positions/redemption: proxy_wallet_address if set, else EOA from private_key.
     pub fn get_wallet_address(&self) -> Result<String> {
         if let Some(ref proxy) = self.proxy_wallet_address {
             return Ok(proxy.clone());
@@ -1529,6 +1631,64 @@ impl PolymarketApi {
         let signer = LocalSigner::from_str(pk)
             .context("Invalid private_key")?;
         Ok(format!("{}", signer.address()))
+    }
+
+    pub async fn get_positions(&self, user: &str) -> Result<Vec<DataApiPosition>> {
+        const PAGE_SIZE: u32 = 500;
+        const MAX_OFFSET: u32 = 10_000;
+        let user = if user.starts_with("0x") { user.to_string() } else { format!("0x{}", user) };
+        let mut all = Vec::new();
+        let mut offset = 0u32;
+        while offset <= MAX_OFFSET {
+            let response = self.client
+                .get("https://data-api.polymarket.com/positions")
+                .query(&[("user", user.as_str()), ("limit", &PAGE_SIZE.to_string()), ("offset", &offset.to_string())])
+                .send()
+                .await
+                .context("Failed to fetch positions")?;
+            if !response.status().is_success() {
+                anyhow::bail!("Data API positions returned {}", response.status());
+            }
+            let page: Vec<Value> = response.json().await.unwrap_or_default();
+            for p in &page {
+                let size = p.get("size")
+                    .and_then(|v| v.as_f64())
+                    .or_else(|| p.get("size").and_then(|v| v.as_u64().map(|u| u as f64)))
+                    .or_else(|| p.get("size").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()));
+                let size = match size { Some(s) => s, None => continue };
+                let cur_price = p.get("curPrice")
+                    .or(p.get("cur_price"))
+                    .and_then(|v| v.as_f64().or_else(|| v.as_u64().map(|u| u as f64)).or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok())))
+                    .unwrap_or(0.0);
+                if size <= 0.0 || cur_price <= 0.0 || (cur_price - 1.0).abs() < 1e-9 {
+                    continue;
+                }
+                let asset = match p.get("asset").and_then(|a| a.as_str()) {
+                    Some(a) => a.to_string(),
+                    None => continue,
+                };
+                let end_date = p.get("endDate").or(p.get("end_date")).and_then(|v| v.as_str()).map(String::from);
+                if let Some(ref ed) = end_date {
+                    if chrono::DateTime::parse_from_rfc3339(ed).map(|t| t.timestamp() < chrono::Utc::now().timestamp()).unwrap_or(false) {
+                        continue;
+                    }
+                }
+                all.push(DataApiPosition {
+                    asset,
+                    size,
+                    cur_price,
+                    condition_id: p.get("conditionId").or(p.get("condition_id")).and_then(|c| c.as_str()).map(String::from),
+                    end_date,
+                    slug: p.get("slug").and_then(|s| s.as_str()).map(String::from),
+                    outcome: p.get("outcome").and_then(|o| o.as_str()).map(String::from),
+                });
+            }
+            if page.len() < PAGE_SIZE as usize {
+                break;
+            }
+            offset += PAGE_SIZE;
+        }
+        Ok(all)
     }
 
     /// Fetch redeemable position condition IDs from Data API (user=wallet, redeemable=true).

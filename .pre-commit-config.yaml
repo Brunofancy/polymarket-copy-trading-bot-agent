@@ -1,0 +1,62 @@
+# Pre-commit hooks for OnlineStatsChains.jl
+# See https://pre-commit.com for more information
+
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      # Prevent large files from being committed
+      - id: check-added-large-files
+        args: ['--maxkb=5000']
+
+      # Ensure files end with a newline
+      - id: end-of-file-fixer
+        exclude: '\.jl\.cov$'
+
+      # Remove trailing whitespace
+      - id: trailing-whitespace
+        exclude: '\.jl\.cov$'
+
+      # Check YAML files are valid
+      - id: check-yaml
+
+      # Check TOML files are valid
+      - id: check-toml
+
+      # Prevent commits to main branch (remove if not needed)
+      # - id: no-commit-to-branch
+      #   args: ['--branch', 'main']
+
+      # Check for merge conflict markers
+      - id: check-merge-conflict
+
+      # Check for files that would conflict on case-insensitive filesystems
+      - id: check-case-conflict
+
+  # Conventional Commits validation
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.1.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: []
+
+  # Julia-specific checks (optional, uncomment if you have JuliaFormatter.jl)
+  # - repo: local
+  #   hooks:
+  #     - id: julia-format
+  #       name: Julia code formatter
+  #       entry: julia --project=@. -e 'using JuliaFormatter; format(".")'
+  #       language: system
+  #       files: \.jl$
+  #       pass_filenames: false
+
+# Configuration for commit-msg hook
+# This ensures conventional commit format
+default_language_version:
+  python: python3
+
+# Install hooks with: pre-commit install
+# Install commit-msg hook with: pre-commit install --hook-type commit-msg
+# Run manually with: pre-commit run --all-files

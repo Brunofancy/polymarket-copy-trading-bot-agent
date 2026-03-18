@@ -1,155 +1,255 @@
-# Polymarket Trading Bot
-
-A Rust trading bot for [Polymarket](https://polymarket.com) that trades 15-minute (and 5-minute) price prediction markets using limit orders and trailing strategies.
-
-**Features:**
-- **Dual Limit Same-Size (0.45)** — Place Up/Down limit buys at $0.45 at market start; hedge with market buy if only one fills (2-min / 4-min / early / standard).
-- **Dual Limit 5-Minute BTC** — Same idea for BTC 5-minute markets with time-based bands and trailing stop.
-- **Trailing Bot** — Wait for price &lt; 0.45, then trail with stop loss and trailing stop on the opposite side.
-- **Backtest** — Replay strategy on historical price data in `history/`.
-- **Test binaries** — Limit order, redeem, merge, allowance, sell, and prediction tests.
-
----
-
-**Watch the bot in action:**
-
-[![Polymarket Trading Bot Demo](https://img.youtube.com/vi/1nF556ypGXM/0.jpg)](https://youtu.be/1nF556ypGXM?si=3d4zmY6lKVj4fVhO)
+<p align="center">
+  <h1 align="center">Polymarket CopyTrading Bot</h1>
+  <p align="center">
+    <strong>Mirror elite traders, monitor your book, and get AI-assisted research from a single, fast interface.</strong>
+  </p>
+  <p align="center">
+    Rust backend &middot; Real-time WebSocket &middot; Web dashboard &middot; Built-in AI Agent
+  </p>
+</p>
 
 ---
 
-## Quick reference
+## What is this?
 
-| Binary | Description |
-|--------|-------------|
-| `main_dual_limit_045_same_size` | Dual limit 0.45, same-size hedge (default) |
-| `main_dual_limit_045_5m_btc` | Dual limit 0.45, BTC 5-minute only |
-| `main_trailing` | Trailing stop bot |
-| `backtest` | Backtest on history files |
-| `test_*` | test_limit_order, test_redeem, test_merge, test_allowance, test_sell, test_predict_fun |
+This project is a self-hosted trading co-pilot for [Polymarket](https://polymarket.com). Instead of manually refreshing polymarket.com and tracking wallets by hand, it gives you:
 
----
+- **Instant copy-trading** — follow one or many high-performing wallets with configurable sizing, filters, and exit rules
+- **Portfolio overview** — see your open positions, notional exposure, and active trades in one consolidated view
+- **Live activity stream** — every trade from your targets, streamed as it happens and organized for quick scanning
+- **AI-powered analysis** — ask the Agent about any market, trader, or position; get structured notes (sentiment, timing, catalysts, risks) and guidance
+- **Simulation mode** — dry-run strategies with no real capital before you go live
 
-## Setup
-
-1. **Install Rust** (if needed):
-   ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   ```
-
-2. **Build:**
-   ```bash
-   cargo build --release
-   ```
-
-3. **Configure:** Copy `config.example.json` to `config.json` and set:
-   - `polymarket`: `api_key`, `api_secret`, `api_passphrase`, `private_key`
-   - Optional: `proxy_wallet_address`, `signature_type` (1 = POLY_PROXY, 2 = GNOSIS_SAFE)
-   - `trading`: enable flags, `dual_limit_price`, `dual_limit_shares`, hedge/trailing params, etc.
+It works across politics, sports, crypto, and macro. You adjust behavior via `trade.toml` (targets + filters). Everything runs locally; API keys and private keys stay on your machine.
 
 ---
 
-## Bot versions
+## Why this exists
 
-### 1. Dual Limit Same-Size Bot (0.45) — default
+Copy trading itself is not the hard part — doing it *sensibly* is. Even on fast chains (Solana, Jito, etc.), a lot of people still lost money because the “strategy” was just mirroring a single wallet. That’s fragile.
 
-**Binary:** `main_dual_limit_045_same_size`
+You actually need:
 
-At market start (first ~5 s), places limit buys for BTC and enabled ETH/SOL/XRP Up/Down at $0.45. If **both** fill → done for that market. If **only one** fills, applies a **2-min / 4-min / early / standard** hedge: buy the unfilled side at market (same size), cancel the unfilled $0.45 limit.
+- Multiple leaders, not a single hero wallet
+- Filters on market type, timing, and size
+- Rules for when to follow, when to ignore, and when to exit
 
-**Low-price exit (0.05 / 0.99 or 0.02 / 0.99):** Two limit sells (cheap at $0.05 or $0.02, opposite at $0.99) are placed only when:
-1. At least **10 minutes** have elapsed.
-2. The market was hedged via **4-min, early, or standard** (not 2-min).
-3. One side’s **bid** is below 0.10 (or below 0.03 for the 0.02/0.99 path when hedge price &lt; 0.60).
+That is where **AI** is useful: it can help reason about signals and prioritize which trades to act on.
+
+This bot came out of several months of iterating on filters, timing, and position sizing. Backtests, simulation runs, and a small live balance pointed toward **slow, consistent compounding** instead of chasing volatility.
+
+Most existing Polymarket copy bots are written in TypeScript or Python and tend to be single-threaded. This stack is **Rust front to back** (server + Leptos/WASM UI) so it can process WebSocket feeds and copy decisions in real time while keeping the UI responsive.
+
+When multiple leaders pile into the same market, the **AI Agent** can help you rank those signals (e.g. by PnL in that category, historical win rate, etc.) so you don’t blindly copy everyone. As markets and leaders evolve, you can use the Agent to periodically reassess which wallets are still worth following.
+
+The design goal isn’t “hit a home run trade”, it’s **durable growth**: diversified risk across sports/crypto/politics/macro, plus an AI-assisted overlay that helps you keep your edge over months, not minutes.
+
+
+---
+
+**By [FemtoDev](https://t.me/femtodev)** — questions, ideas, and contributions are welcome.
+
+---
+
+## Features
+
+| | Feature | What it does |
+|---|---------|-------------|
+| :bar_chart: | **Dashboard** | Live status, activity stream, copy targets — single page for "what's happening right now" |
+| :robot: | **Agent** | AI chat (OpenRouter / OpenAI / Claude). Research any market or position — get trade hints, risk analysis, and confidence signals |
+| :scroll: | **Logs** | Full trade and event log, streamed in real time via SSE |
+| :trophy: | **Top Traders** | Follow the best wallets on Polymarket. See their activity the moment it happens |
+| :briefcase: | **Portfolio** | Your wallet's active trades, total value, and per-target positions side by side |
+| :gear: | **Settings** | All config at a glance — targets, multiplier, exit rules, simulation toggle |
+
+---
+
+## Screenshots
+
+| **Dashboard** | **Agent** |
+|:---:|:---:|
+| <img src="https://i.ibb.co/Rkmq13bj/mm-1.png" alt="mm 1" border="0"> | <img src="https://i.ibb.co/HfXx5kwR/mm-2.png" alt="mm 2" border="0"> |
+
+---
+
+## Quick Start
+
+### 1. Clone
 
 ```bash
-# Simulation
-cargo run --bin main_dual_limit_045_same_size -- --simulation
-
-# Production (default binary)
-cargo run -- --no-simulation
+git clone https://github.com/Krypto-Hashers-Community/polymarket-copytrading-bot-rust-sport-crypto.git
+cd polymarket-copytrading-bot-rust-sport-crypto
 ```
 
-### 2. Dual Limit 5-Minute BTC Bot
+### 2. Configure
 
-**Binary:** `main_dual_limit_045_5m_btc`
+Create two files in the project root:
 
-Dual limit at $0.45 for **BTC 5-minute markets only**. Two windows: **2-min** (2–3 min), **3-min** (≥3 min), with bands and trailing stop (e.g. buy when ask ≥ lowest_ask + 0.03).
+**`config.json`** — your Polymarket CLOB credentials:
 
-```bash
-cargo run --bin main_dual_limit_045_5m_btc -- --config config.json --simulation
-cargo run --bin main_dual_limit_045_5m_btc -- --config config.json --no-simulation
+```jsonc
+{
+  "polymarket": {
+    "gamma_api_url": "https://gamma-api.polymarket.com",
+    "clob_api_url": "https://clob.polymarket.com",
+    "api_key": "your-api-key",
+    "api_secret": "your-api-secret",
+    "api_passphrase": "your-api-passphrase",
+    "private_key": "your-private-key",
+    "proxy_wallet_address": null,
+    "signature_type": 0
+  }
+}
 ```
 
-### 3. Trailing Bot
+**`trade.toml`** — who to copy and how. Use any leader's wallet address from [Polymarket](https://polymarket.com) as `target_address` or in `target_addresses`:
 
-**Binary:** `main_trailing`
+```toml
+[copy]
+target_address = "0x1979ae6B7E6534dE9c4539D0c205E582cA637C9D"
+# or target_addresses = ["0x...", "0x..."]
+size_multiplier = 0.01
+poll_interval_sec = 0.5
 
-Waits until one token’s price is **under 0.45**, then trails that token (trailing stop with 0.45 cap). After the first buy, uses **stop loss + trailing stop** for the opposite token.
+[exit]
+take_profit = 0      # 0 = off
+stop_loss = 0
+trailing_stop = 0
 
-```bash
-cargo run --bin main_trailing -- --simulation
-cargo run --bin main_trailing -- --no-simulation
+[filter]
+buy_amount_limit_in_usd = 0
+entry_trade_sec = 0
+trade_sec_from_resolve = 0
 ```
 
-### 4. Backtest
+**`.env`** *(not required, for AI Agent)*:
 
-**Binary:** `backtest`
+```env
+OPENROUTER_API_KEY=sk-or-...
+# or OPENAI_API_KEY=sk-...
+# or ANTHROPIC_API_KEY=sk-ant-...
+```
 
-Replays the dual-limit strategy on `history/market_*_prices.toml`: limit buys at $0.45, simulated fills, hedge logic, PnL. Requires existing price history files.
+### 3. Build & Run
 
 ```bash
-cargo run --bin backtest -- --backtest
+# Build the frontend (once)
+cd frontend && trunk build --release && cd ..
+
+# Run
+cargo run --release --bin main_copytrading
+```
+
+Open **http://localhost:8000** — that's it. Dashboard, agent, logs, portfolio, everything is there.
+
+### 4. Simulation mode (no real orders)
+
+```bash
+cargo run --release --bin main_copytrading -- --simulation
+```
+
+Perfect for testing your setup, exploring the UI, and evaluating traders before risking capital.
+
+---
+
+## Requirements
+
+| Requirement | Details |
+|------------|---------|
+| **Rust** | 1.70+ |
+| **Polymarket account** | USDC on Polygon + CLOB API keys ([docs](https://docs.polymarket.com/developers/CLOB/)) |
+| **Frontend tooling** | `cargo install trunk` and `rustup target add wasm32-unknown-unknown` |
+
+---
+
+## How it works
+
+The bot subscribes to Polymarket's **activity WebSocket** (`wss://ws-live-data.polymarket.com`) and filters by your target addresses client-side. Trades are pushed the instant they happen — you copy with minimal delay and see them in the UI in real time.
+
+A separate loop refreshes positions for the portfolio view. All copy-trading is driven by the live stream, not polling.
+
+```
+Activity WebSocket ──▶ Filter by targets ──▶ Copy trade ──▶ Dashboard + Logs
+                                                │
+                                         Exit rules (TP/SL/trailing)
 ```
 
 ---
 
-## Test binaries
+## AI Agent
 
-| Binary | Purpose |
-|--------|---------|
-| `test_limit_order` | Place a limit order (e.g. `--price-cents 60 --shares 10`) |
-| `test_redeem` | List/redeem winning tokens (`--list`, `--redeem-all`) |
-| `test_merge` | Merge complete sets to USDC (`--merge`) |
-| `test_allowance` | Check balance/allowance; set approval (`--approve-only`, `--list`) |
-| `test_sell` | Test market sell |
-| `test_predict_fun` | Test prediction/price logic |
+The Agent tab turns your dashboard into a research terminal. Pick a provider (OpenRouter, OpenAI, or Claude) from the dropdown — it uses whichever API keys you set in `.env`.
 
-Example:
+The agent follows the **Monitor → Analyze** method (inspired by [Mahoraga](https://mahoraga.dev/)):
+
+- You ask a question about a market, a position, or a trader
+- The LLM researches sentiment, timing, catalysts, and red flags
+- You get back a structured note: **Signal → Research → Context → Confidence → Guidance**
+
+No execution — research and guidance only. You decide when to act.
+
+---
+
+## Config Reference
+
+**`config.json`** — CLOB API credentials and wallet:
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `clob_api_url` | Yes | `https://clob.polymarket.com` |
+| `private_key` | Yes | Polygon wallet private key |
+| `api_key` / `api_secret` / `api_passphrase` | Yes | From Polymarket CLOB dashboard |
+| `proxy_wallet_address` | No | For proxy/Magic wallets |
+| `signature_type` | No | `0` = EOA, `1` = Proxy, `2` = GnosisSafe |
+
+**`trade.toml`** — copy-trading behavior:
+
+| Section | Key fields |
+|---------|------------|
+| `[copy]` | `target_address` or `target_addresses`, `size_multiplier`, `poll_interval_sec`, `revert_trade` |
+| `[exit]` | `take_profit`, `stop_loss`, `trailing_stop` (0 = off) |
+| `[filter]` | `buy_amount_limit_in_usd`, `entry_trade_sec`, `trade_sec_from_resolve` |
+| `[ui]` | `delta_highlight_sec`, `delta_animation_sec` |
+
+Top-level: `clob_host`, `chain_id`, `port`, `simulation`.
+
+---
+
+## Production Deployment
+
 ```bash
-cargo run --bin test_allowance -- --approve-only   # One-time approval for selling
-cargo run --bin test_redeem -- --list
+# 1. Build frontend
+cd frontend && trunk build --release && cd ..
+
+# 2. Run (serves both API and UI on one port)
+cargo run --release --bin main_copytrading
 ```
 
----
-
-## Configuration
-
-- **`--simulation`** / **`--no-simulation`** — No real orders in simulation.
-- **`--config <path>`** — Config file (default: `config.json`).
-
-**Config fields (summary):**
-- **polymarket:** `gamma_api_url`, `clob_api_url`, `api_key`, `api_secret`, `api_passphrase`, `private_key`, optional `proxy_wallet_address`, `signature_type`.
-- **trading:** `check_interval_ms`, `fixed_trade_amount`, `enable_btc_trading` / `enable_eth_trading` / etc., `dual_limit_price` (0.45), `dual_limit_shares`, `dual_limit_hedge_*`, `trailing_stop_point`, `trailing_shares`, etc.
+Access from any device on your network at `http://<your-server-ip>:8000`. The binary is the single entry point — no separate frontend server needed.
 
 ---
 
-## Notes
+## Project Layout
 
-- Bots run until you stop them (Ctrl+C).
-- Simulation mode logs trades but does not send orders.
-- **Before selling**, set on-chain approval once per proxy wallet:  
-  `cargo run --bin test_allowance -- --approve-only`
+| Path | Role |
+|------|------|
+| `src/bin/main_copytrading.rs` | Entrypoint, HTTP server, agent endpoints |
+| `src/activity_stream.rs` | WebSocket client for real-time trades |
+| `src/copy_trading.rs` | Config, filters, copy logic, exit loop, position diff |
+| `src/api.rs` | Polymarket CLOB/Data API client |
+| `src/clob_sdk.rs` | FFI bindings to the CLOB SDK `.so` |
+| `src/web_state.rs` | Shared state for UI, `/api/state` JSON + SSE |
+| `frontend/` | Leptos (Rust → WASM): dashboard, agent, logs, portfolio, settings |
 
 ---
 
-## Security
+## References
 
-- Do **not** commit `config.json` with real keys or secrets.
-- Prefer simulation and small sizes when testing.
-- Monitor logs and balances when running in production.
+- [Polymarket CLOB Documentation](https://docs.polymarket.com/developers/CLOB/)
+- [Polymarket API Reference](https://docs.polymarket.com/api-reference/introduction)
+- [OpenRouter](https://openrouter.ai/) — multi-model AI gateway
+- [Mahoraga](https://mahoraga.dev/) — Monitor → Analyze method
 
-## Support
+---
 
-If you have any questions or would like a more customized app for specific use cases, please feel free to contact us at the contact information below.
-- E-Mail: admin@hyperbuildx.com
-- Telegram: [@bettyjk_0915](https://t.me/bettyjk_0915)
+<p align="center"><sub>Built for traders who want speed, transparency, and an edge.</sub></p>
