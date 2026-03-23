@@ -25,8 +25,8 @@ fn load_lib() -> Result<&'static Library> {
         .or_else(|| {
             #[cfg(not(target_os = "windows"))]
             let candidates = [
-                "lib/lib.so",
-                "src/lib/lib.so",
+                // "lib/lib.so",
+                // "src/lib/lib.so",
             ];
             #[cfg(not(target_os = "windows"))]
             let found = candidates
