@@ -44,7 +44,7 @@ sol! {
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// Parse a token ID string (hex with optional 0x prefix, or decimal) to U256 for SDK 0.4.
+/// Parse a token ID string (hex with optional 0x prefix, or decimal) to U256 for validation; CLOB builders take `token_id` as a decimal string.
 fn parse_token_id_u256(s: &str) -> Result<U256> {
     let s = s.trim();
     if s.starts_with("0x") || s.starts_with("0X") {
@@ -534,7 +534,7 @@ impl PolymarketApi {
         let token_id_u256 = parse_token_id_u256(&order.token_id)?;
         let order_builder = client
             .limit_order()
-            .token_id(token_id_u256)
+            .token_id(token_id_u256.to_string())
             .size(size)
             .price(price)
             .side(side);
@@ -914,7 +914,7 @@ impl PolymarketApi {
         // For USDC (collateral token), use AssetType::Collateral
         let usdc_token_id = address_to_u256(USDC_ADDRESS)?;
         let request = BalanceAllowanceRequest::builder()
-            .token_id(usdc_token_id)
+            .token_id(usdc_token_id.to_string())
             .asset_type(AssetType::Collateral)
             .build();
         
@@ -1001,7 +1001,7 @@ impl PolymarketApi {
         
         let token_id_u256 = parse_token_id_u256(token_id)?;
         let request = BalanceAllowanceRequest::builder()
-            .token_id(token_id_u256)
+            .token_id(token_id_u256.to_string())
             .asset_type(AssetType::Conditional)
             .build();
         
@@ -1079,7 +1079,7 @@ impl PolymarketApi {
         // Conditional tokens are AssetType::Conditional
         let token_id_u256 = parse_token_id_u256(token_id)?;
         let request = BalanceAllowanceRequest::builder()
-            .token_id(token_id_u256)
+            .token_id(token_id_u256.to_string())
             .asset_type(AssetType::Conditional)
             .build();
         
@@ -1203,7 +1203,7 @@ impl PolymarketApi {
         // Outcome tokens (conditional tokens) need AssetType::Conditional
         let token_id_u256 = parse_token_id_u256(token_id)?;
         let request = UpdateBalanceAllowanceRequest::builder()
-            .token_id(token_id_u256)
+            .token_id(token_id_u256.to_string())
             .asset_type(AssetType::Conditional)
             .build();
         
@@ -1952,12 +1952,6 @@ impl PolymarketApi {
         };
         
         let token_id_u256 = parse_token_id_u256(token_id)?;
-        let order_builder = client
-            .market_order()
-            .token_id(token_id_u256)
-            .amount(amount)
-            .side(side_enum)
-            .order_type(order_type_enum.clone());
         
         // Post order and capture detailed error information
         // For SELL orders, the SDK should handle token approval automatically on the first attempt
@@ -1971,7 +1965,7 @@ impl PolymarketApi {
             // Rebuild order builder for each retry (since it's moved when building)
             let order_builder_retry = client
                 .market_order()
-                .token_id(token_id_u256)
+                .token_id(token_id_u256.to_string())
                 .amount(amount.clone())
                 .side(side_enum)
                 .order_type(order_type_enum.clone());

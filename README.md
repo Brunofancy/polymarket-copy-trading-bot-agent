@@ -99,8 +99,8 @@ Just follow the setup below.
 ### 1) Clone the project
 
 ```bash
-git clone https://github.com/brunobmtx/polymarket-copy-trading-bot-agent.git
-cd polymarket-copy-trading-bot-agent
+git clone https://github.com/brunobmtx/polymarket-copy-trading-agent.git
+cd polymarket-copy-trading-agent
 ````
 
 ---
@@ -329,7 +329,7 @@ This project serves the UI and backend together, so the setup is relatively simp
 
 ## Project structure
 
-This repository is the backend trading engine that powers `polymarket-copy-trading-bot-agent`.
+This repository is the backend trading engine that powers `polymarket-copy-trading-agent`.
 
 It is centered on Rust trading logic and uses the `polymarket-client-sdk` crate for Polymarket API, data, and websocket access.
 
@@ -387,7 +387,7 @@ If you want to explore the code, here is the easiest mental model:
 ### Frontend folder
 
 * `frontend/`
-  Auxiliary frontend code kept alongside the backend project; the main dashboard product lives in `polymarket-copy-trading-bot-agent`
+  Auxiliary frontend code kept alongside the backend project; the main dashboard product lives in `polymarket-copy-trading-agent`
 
 ---
 

@@ -410,6 +410,3 @@ async fn redeem_token(
         }
     }
 }
-}
-    }
-}
