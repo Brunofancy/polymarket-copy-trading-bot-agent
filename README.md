@@ -1,125 +1,379 @@
-# Polymarket Copy Trading Agent
-Rust backend · Real-time Polymarket stream · Web dashboard · AI agent for trading research
-This project is a **Polymarket copy trading agent** built for people who want a smoother way to trade on **Polymarket**.
+# Polymarket Trading Agent
+Rust backend · Real-time Polymarket market data · Structured Polymarket trading workflow
 
-Instead of manually checking wallets, refreshing markets, and trying to react late, this project helps you handle **Polymarket trading** from one place. You can watch trader activity, copy trades, monitor positions, and use an **AI agent** to research markets before making decisions.
+This project is a **Polymarket trading agent** built for traders who want a more structured way to trade on **Polymarket**.
+
+Instead of manually watching markets, refreshing positions, and reacting too late, this project helps you manage a full **Polymarket trading** workflow from one place. It is designed around live execution, open-position tracking, exit logic, settlement handling, and a local dashboard.
 
 The goal is simple:
 
-- make **Polymarket trading** easier
-- make wallet tracking easier
-- make copy trading more practical
-- give users an **agent** that helps with market analysis
+- make **Polymarket trading** easier to understand
+- make **trading** execution more structured
+- make position management more practical
+- help users understand the full **Polymarket trading** lifecycle
 - keep everything fast and local
 
-This is not just a dashboard. It is a **Polymarket trading workflow** with an integrated **agent** layer.
+---
+
+## What this Polymarket trading agent does
+
+With this **Polymarket trading agent**, you can:
+
+- monitor live **Polymarket** market activity
+- manage **trading** entries and exits
+- track open positions in real time
+- run the agent in simulation mode before live **trading**
+- follow a structured **Polymarket trading** lifecycle from entry to settlement
+
+If you already trade on **Polymarket**, this project is meant to make your **trading** process more organized and easier to manage.
 
 ---
 
-## What this project helps you do
+## Main idea of the trading logic
 
-With this **Polymarket agent**, you can:
+The easiest way to understand this **Polymarket trading agent** is:
 
-- follow one or more traders on **Polymarket**
-- copy their **trading** activity automatically
-- watch live **Polymarket** trades as they happen
-- review your portfolio and open positions
-- test ideas in simulation mode before live **trading**
-- use an AI **agent** to analyze a market, trader, or position
+1. something outside the trading layer finds an opportunity
+2. it passes a token, price, and timing into the agent
+3. the agent opens a position
+4. the agent keeps that position in memory
+5. the agent keeps managing that position until exit or settlement
 
-If you already spend time watching **Polymarket**, this project is meant to make that process more comfortable.
+This means the system is split into two parts:
 
----
+### 1) Opportunity handoff
+A separate monitor or rules layer decides:
 
-## Why this Polymarket trading agent exists
+- this **Polymarket** market is interesting
+- this token should be traded
+- this is the entry price
+- this is the timing
 
-A lot of people try copy trading on **Polymarket**, but many do it in a very basic way:
+### 2) Trade execution and management
+Once that information is handed off, the **trading agent** does the rest:
 
-- follow one wallet
-- copy everything
-- hope it works
+- open the trade
+- record the position
+- wait for fill confirmation
+- place exit orders
+- manage stop-loss and take-profit logic
+- monitor the position in a loop
+- settle or redeem when the market ends
+- keep internal state aligned with the real wallet
 
-That usually breaks down fast.
-
-Good **trading** on **Polymarket** needs more than blind copying. It needs filtering, timing, sizing, and better judgment. That is why this project combines:
-
-- real-time **Polymarket** trade tracking
-- configurable copy **trading**
-- portfolio monitoring
-- an AI **agent** for research and context
-
-The **agent** does not place trades for you. It helps you think more clearly about a market, a signal, or a trader before you act.
-
-So the real purpose of this project is not reckless speed. It is better decision-making for **Polymarket trading**.
+So this repository is focused on the full life of a trade, not just signal discovery.
 
 ---
 
-## What you get in the dashboard
+## Core trading model: open positions in memory
 
-When you run the project, you get a web interface where your **Polymarket trading** activity is easier to understand.
+At the center of this **Polymarket trading** logic is a list of **open positions** stored in memory.
 
-### Dashboard
-See what is happening right now in your **Polymarket** setup. This is the fastest place to monitor live copy **trading**, recent actions, and important changes.
+Each open position remembers:
 
-### Agent
-The AI **agent** helps with **Polymarket** market research. Ask about a market, a trader, a position, or a recent move, and the **agent** gives you structured trading context.
+- which **15-minute Polymarket market** it belongs to
+- which outcome token was bought
+- how many shares were bought
+- what price was paid
+- how the trade was opened
+- whether exit orders exist
+- what should happen next
 
-### Logs
-Review the full history of events and **trading** actions in real time.
+That “what should happen next” can mean:
 
-### Top Traders
-Track the wallets you care about most on **Polymarket** and watch their activity as it happens.
+- exit at a profit target
+- stop out if price falls
+- hold to market settlement
+- hedge using the opposite outcome
+- close if a limit sell was filled
 
-### Portfolio
-See your current positions, exposure, and active **trading** state in one place.
+This matters because **Polymarket trading** is not only about entry. Most of the logic happens after the trade is already open.
 
-### Settings
-Adjust how your copy **trading agent** behaves, including sizing, filters, and exit logic.
+A background loop runs often and checks every open position. That loop handles:
+
+- balances
+- prices
+- fill detection
+- exit order placement
+- stop-loss triggers
+- target exits
+- settlement checks
+- cleanup of closed positions
+
+So the agent behaves like a live position manager for **Polymarket trading**.
 
 ---
 
-## Screenshots
+## How a position starts
 
-| Dashboard | Agent | Logs |
-|:---:|:---:|:---:|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Agent](docs/screenshots/agent.png) | ![Logs](docs/screenshots/logs.png) |
+This **Polymarket trading agent** supports two main entry styles.
 
-| Top Traders | Portfolio | Settings |
-|:---:|:---:|:---:|
-| ![Top Traders](docs/screenshots/toptraders.png) | ![Portfolio](docs/screenshots/portfolio.png) | ![Settings](docs/screenshots/settings.png) |
+## 1) Market-style entry
+
+This is used when the agent wants fast entry.
+
+How it works:
+
+- the agent uses a roughly fixed dollar budget from config
+- it sends a buy that must fill immediately in full or cancel
+- partial fill is not accepted
+- after the order is accepted, the agent polls wallet balance
+- when shares appear, it records the position using the actual share count
+
+This path is useful for momentum-style **Polymarket trading** where fast entry matters.
+
+Mental model:
+
+- opportunity appears
+- buy now
+- confirm shares
+- start managing the position
+
+## 2) Limit-style entry
+
+This is used when the agent wants more controlled entry.
+
+How it works:
+
+- the agent places a limit buy at a chosen price
+- order size is based on the configured budget and limit price
+- before placing the order, it records the current balance
+- later, it checks for a balance increase
+- if balance increased, it treats that as proof the limit buy filled
+- then it updates the position with the new filled amount
+
+This path is useful when price quality matters more than immediate execution.
+
+Optional behavior:
+
+- during some testing or bookkeeping modes, the agent can record positions without placing follow-up sells
 
 ---
 
-## Workflow (diagrams)
+## What happens right after a buy
 
-Place these files in `docs/` (or adjust paths if you store assets elsewhere).
+Once a buy is confirmed, the **Polymarket trading agent** usually prepares the position for exit management.
 
-### Step 1
+### Market-style path after shares appear
+
+When a market-style buy is confirmed:
+
+- the agent often posts a resting limit sell at the profit target
+- this gives the position a pre-armed exit
+- that means you do not need to rely only on later manual reaction
+
+### Limit-style path after fill
+
+When a limit buy is detected as filled:
+
+- the agent updates the position state
+- it may place one limit sell at the configured profit target
+- that can be skipped in special bookkeeping modes
+
+So after entry, the system tries to convert the trade into a managed position.
+
+---
+
+## The maintenance loop: the heart of the trading agent
+
+The repeating maintenance loop is the most important part of this **Polymarket trading agent**.
+
+This loop runs on a timer and walks through every open position.
+
+That is what allows the agent to keep reacting while a **Polymarket** market is still active.
+
+Below is the easiest way to understand that loop.
+
+### 1) Simulation branch
+
+If the agent is running in simulation mode:
+
+- it uses simulated order books and internal fill logic
+- it tracks which orders would fill
+- it tracks how positions would behave until market end
+- it does not send real orders like production mode
+
+This makes it possible to understand the **trading** logic before using real money.
+
+### 2) Detect limit buy fills
+
+For positions opened with a limit buy:
+
+- the agent compares current balance with the balance before the order
+- if shares increased, the buy is treated as filled
+- the position size is updated
+- the agent may then place a profit-target limit sell
+
+This is one of the key ideas in the system:
+fill detection can be based on real balance change.
+
+### 3) Detect limit sell fills
+
+For positions that already placed limit sells:
+
+- the agent checks whether the token balance is now close to zero
+- if yes, it treats the sell as completed
+- then it closes the position in the internal ledger
+
+This helps the **Polymarket trading agent** stay aligned with actual wallet state.
+
+### 4) Market-style follow-up
+
+For positions that came from market entry:
+
+- if shares are confirmed
+- and if a protective exit sell is not already on the book
+- the agent can place one profit-target limit sell for the full balance
+
+This means the agent can enter aggressively and then manage the exit more carefully.
+
+### 5) Active management while still holding shares
+
+This is the core live **trading** behavior.
+
+For every still-open position, the agent does the following:
+
+#### Read the current sellable price
+It checks the price the agent could realistically get by selling now.
+
+This is more useful than just reading a last traded price.
+
+#### Skip if there is no liquidity
+If there are no real buyers in the order book:
+
+- the agent avoids trying to sell into empty liquidity
+- it waits instead of forcing bad execution
+
+Liquidity matters a lot in **Polymarket trading**.
+
+#### Stop-loss logic
+If the sellable price falls below the configured stop-loss level:
+
+- the agent tries to exit using a market-style sell
+- it can retry with backoff
+- after a successful stop, hedge logic may activate
+
+#### Hedge logic
+After a stop-loss exit, the agent may optionally interact with the opposite outcome.
+
+That means it can:
+
+- buy the opposite side
+- or place limit orders on the opposite side
+- using levels derived from the stop configuration
+
+This is used to partly manage outcome-pair exposure instead of only closing the original side.
+
+#### Profit target logic
+If the price reaches or exceeds the configured target:
+
+- the agent attempts to close the position with a market-style sell
+- it can retry if needed
+- if price moves away before the exit succeeds, the attempt may be abandoned and the position returns to monitoring
+
+That means target detection is not enough by itself. The agent still has to deal with real market conditions.
+
+#### Opposite-side special stop logic
+If a position was created as part of a hedge, it can use its own stop behavior.
+
+That matters because a hedge position is not always managed exactly like the original position.
+
+### 6) Settlement
+
+When the **15-minute Polymarket market** ends:
+
+- another process checks whether the market has resolved
+- winning positions are redeemed
+- losing positions are written off
+- retries are used when needed
+- after too many failures, the agent stops retrying forever
+
+This matters because **Polymarket trading** does not end only when you stop watching price. Some positions must still be settled or redeemed.
+
+### 7) Reconciliation
+
+Sometimes internal state and the real wallet can drift apart.
+
+For example:
+
+- the wallet balance is already zero
+- but the agent still thinks the position is open
+
+So the system periodically reconciles internal state with the real portfolio.
+
+If the real balance is zero:
+
+- the position is marked closed
+- the agent stops trying to sell or redeem a ghost position
+
+This makes long-running **Polymarket trading** more stable.
+
+---
+
+## Simple mental model of the full trading flow
+
+The easiest one-paragraph explanation is:
+
+A separate monitor or rules layer discovers an opportunity in **Polymarket** and hands the trading layer a token, price, and timing. The **Polymarket trading agent** opens the position with either a market buy or a limit buy, records that position in memory, waits for fill confirmation, optionally places a profit-taking limit sell, and then repeatedly watches price, liquidity, stop-loss, target exits, hedge conditions, and settlement state until the trade is fully closed, redeemed, or written off.
+
+---
+
+## Simulation vs production
+
+This **Polymarket trading agent** supports both simulation and production.
+
+### Production mode
+
+Production uses:
+
+- real orders
+- real balances
+- real polling
+- real order book interaction
+- real limit orders
+- real market sells
+- real settlement handling
+- real redemption when needed
+
+This is the live **Polymarket trading** path.
+
+### Simulation mode
+
+Simulation uses:
+
+- simulated fills
+- simulated order book behavior
+- internal state tracking
+- hold-to-expiry behavior in many cases
+- PnL at resolution
+- winner resolves to `$1`
+- loser resolves to `$0`
+
+Simulation is useful for learning how the **trading logic** behaves without risking capital.
+
+---
+
+## Workflow diagrams
 
 ![Step 1](docs/step1.png)
-
-### Full pipeline
-
 ![Full pipeline](docs/full_pipeline.png)
 
 ---
 
 ## Getting started
 
-You do not need to understand the whole codebase before using this **Polymarket trading agent**.
+You do not need to understand the full codebase before using this **Polymarket trading agent**.
 
 Just follow the setup below.
 
-### 1) Clone the project
+## 1) Clone the project
 
 ```bash
-git clone https://github.com/brunobmtx/polymarket-copy-trading-agent.git
-cd polymarket-copy-trading-agent
+git clone https://github.com/brunobmtx/polymarket-trading-agent.git
+cd polymarket-trading-agent
 ````
 
----
-
-### 2) Add your Polymarket credentials
+## 2) Add your Polymarket credentials
 
 Create a `config.json` file in the project root.
 
@@ -140,21 +394,18 @@ This file is for your **Polymarket** CLOB credentials and wallet setup.
 }
 ```
 
-This is the core connection between your local setup and **Polymarket trading**.
+This is the core connection between your local environment and **Polymarket trading**.
 
----
-
-### 3) Define how your copy trading should behave
+## 3) Define your trading behavior
 
 Create a `trade.toml` file in the project root.
 
-This file tells the **agent** which **Polymarket** trader to follow and how your **trading** rules should work.
+This file controls how the **Polymarket trading agent** behaves.
 
 ```toml
-[copy]
-target_address = "0x1979ae6B7E6534dE9c4539D0c205E582cA637C9D"
-# or target_addresses = ["0x...", "0x..."]
-size_multiplier = 0.01
+[entry]
+trade_amount_usd = 10
+entry_mode = "market" # or "limit"
 poll_interval_sec = 0.5
 
 [exit]
@@ -163,75 +414,36 @@ stop_loss = 0
 trailing_stop = 0
 
 [filter]
-buy_amount_limit_in_usd = 0
 entry_trade_sec = 0
 trade_sec_from_resolve = 0
 ```
 
-A few important notes:
+Important notes:
 
-* `target_address` is the **Polymarket** wallet you want to copy
-* `size_multiplier` controls how much of their trade size you mirror
-* exit values set your **trading** protection rules
-* filter values help you avoid low-quality copy **trading** behavior
+* `trade_amount_usd` defines the approximate budget per trade
+* `entry_mode` controls how the agent enters
+* `[exit]` defines protection and target logic
+* `[filter]` helps narrow when the agent is allowed to trade
 
----
+## Test first with simulation mode
 
-### 4) Add AI agent keys if you want agent research
-
-The AI **agent** is optional, but it makes the **Polymarket trading** workflow much more useful.
-
-Create a `.env` file if you want to use the **agent**:
-
-```env
-OPENROUTER_API_KEY=sk-or-...
-# or OPENAI_API_KEY=sk-...
-# or ANTHROPIC_API_KEY=sk-ant-...
-```
-
-Without this, the copy **trading** features still work.
-With this, the **agent** tab becomes available for research.
-
----
-
-### 5) Build and run
+Use simulation mode before live **trading** if you want to understand the logic first.
 
 ```bash
-cd frontend && trunk build --release && cd ..
-cargo run --release --bin main_copytrading
+cargo run --release --bin main_trading -- --simulation
 ```
-
-Then open:
-
-```text
-http://localhost:8000
-```
-
-At that point, your **Polymarket agent** dashboard should be live.
-
----
-
-## Want to test first without real trading?
-
-Use simulation mode.
-
-```bash
-cargo run --release --bin main_copytrading -- --simulation
-```
-
-This is the best way to get comfortable with the **Polymarket trading agent** before live use.
 
 Simulation mode is useful for:
 
 * testing your setup
-* checking your copy **trading** configuration
-* reviewing trader behavior
-* exploring the dashboard
-* using the **agent** safely before real execution
+* checking your **trading** configuration
+* understanding the **Polymarket trading** lifecycle
+* reviewing how entry and exit logic behaves
+* exploring the dashboard safely
 
 ---
 
-## What you need before using it
+## Requirements
 
 Before running this **Polymarket** project, make sure you have:
 
@@ -246,58 +458,33 @@ Before running this **Polymarket** project, make sure you have:
 
 ---
 
-## How the Polymarket trading flow works
-
-This **agent** listens to the live **Polymarket** activity WebSocket.
-
-When a target wallet makes a trade, the project sees that event, checks your rules, and decides whether to copy the **trading** action. At the same time, it updates the dashboard so you can see what is happening.
-
-Basic flow:
+## Basic Polymarket trading flow
 
 ```text
-Polymarket activity stream
+Polymarket market data / opportunity handoff
         ↓
-filter by target wallet
+select token, price, and timing
         ↓
-apply trading rules
+open trade with market or limit entry
         ↓
-copy trade or ignore
+record position in memory
         ↓
-show result in dashboard, logs, and portfolio
+watch fills, price, liquidity, and exits
+        ↓
+take profit, stop out, hedge, or hold
+        ↓
+settle or redeem at market resolution
+        ↓
+sync internal state with wallet
 ```
 
-So the project is always centered around real-time **Polymarket trading**.
+This is the core lifecycle of the **Polymarket trading agent**.
 
 ---
 
-## How the AI agent helps
+## Config explanation
 
-The AI **agent** is for research, not automatic execution.
-
-You can ask the **agent** things like:
-
-* Is this **Polymarket** market worth entering?
-* Why is this trader buying here?
-* What are the risks of this position?
-* What changed in this market?
-* Is this move likely late for copy **trading**?
-
-The **agent** can help organize your thinking around:
-
-* market sentiment
-* catalysts
-* timing
-* confidence
-* possible risks
-* overall **trading** context
-
-This makes the **agent** useful as a research assistant inside your **Polymarket** workflow.
-
----
-
-## A simple explanation of the main config
-
-### `config.json`
+## `config.json`
 
 This handles your **Polymarket** credentials and wallet settings.
 
@@ -309,65 +496,50 @@ Important fields:
 * `proxy_wallet_address` → optional
 * `signature_type` → wallet signing mode
 
-### `trade.toml`
+## `trade.toml`
 
-This controls your copy **trading** behavior.
+This controls your **trading** behavior.
 
 Important areas:
 
-* `[copy]` → who you follow and how much you copy
-* `[exit]` → risk controls for **trading**
-* `[filter]` → filters that reduce bad copy **trading**
-* `[ui]` → dashboard behavior
-
----
-
-## Running it in production
-
-To deploy this **Polymarket trading agent** on a server:
-
-```bash
-cd frontend && trunk build --release && cd ..
-cargo run --release --bin main_copytrading
-```
-
-You can then access it from another device on your network with:
-
-```text
-http://<your-server-ip>:8000
-```
-
-This project serves the UI and backend together, so the setup is relatively simple for a **Polymarket** tool.
+* `[entry]` → trade amount, entry mode, and polling behavior
+* `[exit]` → take profit, stop loss, trailing logic
+* `[filter]` → time-based or opportunity-based constraints
+* `[ui]` → dashboard behavior if used in your local setup
 
 ---
 
 ## Project structure
 
-This repository is the backend trading engine that powers `polymarket-copy-trading-agent`.
+This repository is the backend **trading** engine behind the Polymarket dashboard.
 
-It is centered on Rust trading logic and uses the `polymarket-client-sdk` crate for Polymarket API, data, and websocket access.
-
-If you want to explore the code, here is the easiest mental model:
+It is centered on Rust **trading logic** and uses the `polymarket-client-sdk` crate for **Polymarket** API, data, and websocket access.
 
 ### Core library modules
 
 * `src/lib.rs`
   Library entry point, module exports, and shared history logging helpers
+
 * `src/api.rs`
-  High-level Polymarket API wrapper built on top of `polymarket-client-sdk`
+  High-level **Polymarket** API wrapper built on top of `polymarket-client-sdk`
+
 * `src/config.rs`
   Config structs, defaults, and CLI/runtime configuration loading
+
 * `src/models.rs`
-  Shared domain models for markets, tokens, prices, and trading state
+  Shared domain models for markets, tokens, prices, and **trading** state
+
 * `src/merge.rs`
   Merge-related helpers for outcome token handling
 
 ### Trading and execution
 
 * `src/trader.rs`
-  Main trading engine, order placement flow, position management, and execution logic
+  Main **trading** engine, order placement flow, position management, and execution logic
+
 * `src/simulation.rs`
   Simulation and dry-run behavior for testing strategies without live execution
+
 * `src/detector.rs`
   Signal and opportunity detection logic used before trade execution
 
@@ -378,43 +550,31 @@ If you want to explore the code, here is the easiest mental model:
 
 ### Binaries
 
-* `src/bin/main_dual_limit_045.rs`
+* `src/bin/main_trading.rs`
   Main strategy entry point and current default run target
+
 * `src/bin/main_price_monitor.rs`
-  Standalone market/price monitor binary
+  Standalone market and price monitor binary
 
 ### Utility and test binaries
 
 * `src/bin/test_allowance.rs`
-  Checks token allowance-related behavior
 * `src/bin/test_limit_order.rs`
-  Tests limit order flow
 * `src/bin/test_merge.rs`
-  Tests merge behavior
 * `src/bin/test_predict_fun.rs`
-  Utility test binary for prediction-related workflows
 * `src/bin/test_redeem.rs`
-  Tests redemption flow
 * `src/bin/test_sell.rs`
-  Tests sell order flow
-
-### Frontend folder
-
-* `frontend/`
-  Auxiliary frontend code kept alongside the backend project; the main dashboard product lives in `polymarket-copy-trading-agent`
-
----
 
 ## Who this project is for
 
 This project is a good fit if you are:
 
 * active on **Polymarket**
-* interested in copy **trading**
-* trying to monitor multiple traders
-* building a better **trading** workflow
-* looking for a local-first **agent** tool
-* interested in combining AI **agent** research with **Polymarket**
+* interested in structured **trading**
+* trying to improve your execution workflow
+* managing short-window **Polymarket** positions
+* looking for a local-first **trading agent**
+* interested in better position management and settlement handling
 
 It is especially useful if you want faster execution and a more organized **trading** process.
 
@@ -424,8 +584,13 @@ It is especially useful if you want faster execution and a more organized **trad
 
 * [Polymarket CLOB Documentation](https://docs.polymarket.com/developers/CLOB/)
 * [Polymarket API Reference](https://docs.polymarket.com/api-reference/introduction)
-* [OpenRouter](https://openrouter.ai/)
 * [Mahoraga](https://mahoraga.dev/)
+
+---
+
+## Future plan
+
+In version 2, I will implement AI-based features for new functionality such as risk management, smarter market evaluation, and improved trading support.
 
 ---
 
